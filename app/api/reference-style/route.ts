@@ -11,6 +11,10 @@ type RequestBody = {
   profile?: { channel?: string; theme?: string; audience?: string; tone?: string };
 };
 
+function normalizeApiKey(value?: string) {
+  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
+}
+
 function bucket() {
   const runtime = env as unknown as { BUCKET?: R2Bucket };
   if (!runtime.BUCKET) throw new Error("reference_storage_unavailable");
@@ -25,7 +29,7 @@ async function userPrefix() {
 
 export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
-  const apiKey = body.apiKey?.trim();
+  const apiKey = normalizeApiKey(body.apiKey);
   const model = body.model?.trim();
   const keys = (body.referenceKeys ?? []).slice(0, 4);
   if (!apiKey || !model) return Response.json({ error: "vision_configuration_required" }, { status: 400 });

@@ -40,6 +40,7 @@ type ReferenceThumbnail = { key: string; name: string; contentType: string; size
 type AiSettings = {
   openaiKey: string; openrouterKey: string; openrouterModel: string; visionModel: string;
   imageModel: "gpt-image-2" | "gpt-image-1.5"; imageQuality: "low" | "medium" | "high";
+  rememberKeys: boolean;
 };
 
 type ExpressState = {
@@ -105,7 +106,8 @@ export default function ScriptStudio() {
   const [profile, setProfile] = useState(profileDemo);
   const [projects, setProjects] = useState(demoProjects);
   const [express, setExpress] = useState<ExpressState>(expressDefault);
-  const [aiSettings, setAiSettings] = useState<AiSettings>({ openaiKey: "", openrouterKey: "", openrouterModel: "", visionModel: "", imageModel: "gpt-image-2", imageQuality: "medium" });
+  const [aiSettings, setAiSettings] = useState<AiSettings>({ openaiKey: "", openrouterKey: "", openrouterModel: "", visionModel: "", imageModel: "gpt-image-2", imageQuality: "medium", rememberKeys: false });
+  const [credentialsHydrated, setCredentialsHydrated] = useState(false);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [referenceThumbnails, setReferenceThumbnails] = useState<ReferenceThumbnail[]>([]);
   const [activeId, setActiveId] = useState(demoProjects[0].id);
@@ -127,15 +129,32 @@ export default function ScriptStudio() {
   useEffect(() => {
     const local = localStorage.getItem("script-studio-workspace");
     const localLang = localStorage.getItem("script-studio-lang") as Lang | null;
+    const savedCredentials = localStorage.getItem("script-studio-ai-credentials");
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (localLang === "fr" || localLang === "en") setLang(localLang);
     if (local) {
       try { const parsed = JSON.parse(local); setProfile({ ...profileDemo, ...(parsed.profile ?? {}) }); setProjects(parsed.projects ?? demoProjects); setActiveId(parsed.activeId ?? demoProjects[0].id); setExpress(parsed.express ?? expressDefault); } catch { /* retain demo */ }
     }
+    if (savedCredentials) {
+      try {
+        const parsed = JSON.parse(savedCredentials) as Partial<AiSettings>;
+        setAiSettings(current => ({ ...current, ...parsed, rememberKeys: true }));
+      } catch { localStorage.removeItem("script-studio-ai-credentials"); }
+    }
+    setCredentialsHydrated(true);
     fetch("/api/workspace").then(r => r.json() as Promise<{ payload?: { profile: Profile; projects: Project[]; activeId: string; express?: ExpressState } }>).then(data => {
       if (data.payload?.projects?.length) { setProfile({ ...profileDemo, ...data.payload.profile }); setProjects(data.payload.projects); setActiveId(data.payload.activeId); setExpress(data.payload.express ?? expressDefault); }
     }).catch(() => null).finally(() => setHydrated(true));
   }, []);
+
+  useEffect(() => {
+    if (!credentialsHydrated) return;
+    if (aiSettings.rememberKeys) {
+      localStorage.setItem("script-studio-ai-credentials", JSON.stringify(aiSettings));
+    } else {
+      localStorage.removeItem("script-studio-ai-credentials");
+    }
+  }, [aiSettings, credentialsHydrated]);
 
   useEffect(() => {
     fetch("/api/openrouter-models").then(response => response.json() as Promise<{ models?: OpenRouterModel[] }>).then(data => {
@@ -200,6 +219,7 @@ export default function ScriptStudio() {
         }),
       });
       const data = await response.json() as { result?: { hook?: string; promise?: string }; error?: string; detail?: string };
+      if (response.status === 401) throw new Error(lang === "fr" ? "Clé OpenRouter refusée. Vérifiez-la dans le profil ou créez-en une nouvelle." : "OpenRouter rejected the key. Check it in your profile or create a new one.");
       if (!response.ok || !data.result?.hook || !data.result.promise) throw new Error(data.detail || data.error || "generation_failed");
       updateProject({
         hook: target === "promise" ? project.hook : data.result.hook,
@@ -340,6 +360,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
         body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt, descriptionFooter: profile.descriptionFooter } }),
       });
       const data = await response.json() as { result?: PackagingResult; error?: string; detail?: string };
+      if (response.status === 401) throw new Error(lang === "fr" ? "Clé OpenRouter refusée. Testez-la dans le profil." : "OpenRouter rejected the key. Test it in your profile.");
       if (!response.ok || !data.result) throw new Error(data.detail || data.error || "generation_failed");
       const result = data.result;
       if (!Array.isArray(result.options) || result.options.length !== 3 || result.options.some(option => !Array.isArray(option.concepts) || option.concepts.length !== 3)) throw new Error("invalid_packaging_shape");
@@ -404,7 +425,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
   if (!value.generated || !value.package) return <div className="express-page">
     <div className="express-hero"><div><span className="eyebrow">{lang === "fr" ? "VIDÉO DÉJÀ TOURNÉE" : "VIDEO ALREADY RECORDED"}</span><h1>{lang === "fr" ? "Du contenu au clic." : "From content to click."}</h1><p>{lang === "fr" ? "Collez votre script ou votre description. Le modèle OpenRouter choisi prépare le packaging, puis OpenAI génère les vraies miniatures." : "Paste your script or description. Your chosen OpenRouter model prepares the packaging, then OpenAI generates real thumbnails."}</p></div><div className="express-orbit"><span>3×3</span><small>{lang === "fr" ? "titres × concepts" : "titles × concepts"}</small></div></div>
     <section className="express-input-card">
-      <div className={`ai-ready-strip ${configured && aiSettings.openaiKey ? "ready" : ""}`}><span>{configured && aiSettings.openaiKey ? "✓" : "!"}</span><div><strong>{configured && aiSettings.openaiKey ? (lang === "fr" ? "IA configurée pour cette session" : "AI configured for this session") : (lang === "fr" ? "Configuration IA requise" : "AI setup required")}</strong><small>{configured ? aiSettings.openrouterModel : (lang === "fr" ? "Clé OpenRouter + modèle requis" : "OpenRouter key + model required")} · {aiSettings.openaiKey ? aiSettings.imageModel : (lang === "fr" ? "clé OpenAI manquante" : "OpenAI key missing")}</small></div><button onClick={openAiSettings}>{lang === "fr" ? "Configurer" : "Configure"}</button></div>
+      <div className={`ai-ready-strip ${configured && aiSettings.openaiKey ? "ready" : ""}`}><span>{configured && aiSettings.openaiKey ? "✓" : "!"}</span><div><strong>{configured && aiSettings.openaiKey ? (lang === "fr" ? "IA configurée" : "AI configured") : (lang === "fr" ? "Configuration IA requise" : "AI setup required")}</strong><small>{configured ? aiSettings.openrouterModel : (lang === "fr" ? "Clé OpenRouter + modèle requis" : "OpenRouter key + model required")} · {aiSettings.openaiKey ? aiSettings.imageModel : (lang === "fr" ? "clé OpenAI manquante" : "OpenAI key missing")} · {aiSettings.rememberKeys ? (lang === "fr" ? "clés mémorisées sur cet appareil" : "keys remembered on this device") : (lang === "fr" ? "session uniquement" : "session only")}</small></div><button onClick={openAiSettings}>{lang === "fr" ? "Configurer" : "Configure"}</button></div>
       <div className={`vidiq-requirement ${profile.vidiqConnected ? "connected" : ""}`}><span>{profile.vidiqConnected ? "✓" : "!"}</span><div><strong>{profile.vidiqConnected ? (lang === "fr" ? "Compte vidIQ connecté" : "vidIQ account connected") : (lang === "fr" ? "Connexion vidIQ requise" : "vidIQ connection required")}</strong><small>{lang === "fr" ? "Les scores seront repris tels quels depuis vidIQ — jamais estimés." : "Scores are reported exactly as returned by vidIQ — never estimated."}</small></div></div>
       <div className="source-toggle"><button className={value.inputType === "script" ? "active" : ""} onClick={() => update({ inputType: "script", generated: false })}>▤ {lang === "fr" ? "J’ai le script" : "I have the script"}<small>{lang === "fr" ? "Inclut 5 quiz" : "Includes 5 quizzes"}</small></button><button className={value.inputType === "description" ? "active" : ""} onClick={() => update({ inputType: "description", generated: false })}>≡ {lang === "fr" ? "J’ai la description" : "I have the description"}<small>{lang === "fr" ? "Packaging uniquement" : "Packaging only"}</small></button></div>
       <label><span>{lang === "fr" ? "Sujet de la vidéo (facultatif)" : "Video topic (optional)"}</span><input value={value.subject} onChange={event => update({ subject: event.target.value, generated: false })} placeholder={lang === "fr" ? "Le système le déduira du contenu si ce champ est vide" : "The system will infer it from the content if left blank"} /></label>
@@ -586,6 +607,24 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
   const [styleLoading, setStyleLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [iteration, setIteration] = useState("");
+  const [openRouterKeyStatus, setOpenRouterKeyStatus] = useState<"idle" | "loading" | "valid" | "invalid">("idle");
+  const [openRouterKeyLabel, setOpenRouterKeyLabel] = useState("");
+  const validateOpenRouterKey = async () => {
+    if (!aiSettings.openrouterKey.trim()) return showToast(lang === "fr" ? "Ajoutez d’abord une clé OpenRouter." : "Add an OpenRouter key first.");
+    setOpenRouterKeyStatus("loading");
+    try {
+      const response = await fetch("/api/openrouter-key", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey: aiSettings.openrouterKey }) });
+      const data = await response.json() as { valid?: boolean; label?: string; error?: string };
+      if (!response.ok || !data.valid) throw new Error(data.error || "key_rejected");
+      setOpenRouterKeyStatus("valid");
+      setOpenRouterKeyLabel(data.label ?? "OpenRouter");
+      showToast(lang === "fr" ? "Clé OpenRouter valide" : "OpenRouter key is valid");
+    } catch {
+      setOpenRouterKeyStatus("invalid");
+      setOpenRouterKeyLabel("");
+      showToast(lang === "fr" ? "OpenRouter refuse cette clé. Vérifiez-la ou créez-en une nouvelle." : "OpenRouter rejected this key. Check it or create a new one.");
+    }
+  };
   const uploadReferences = async (files: FileList | null) => {
     if (!files?.length) return;
     const available = 4 - referenceThumbnails.length;
@@ -621,17 +660,18 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
     finally { setStyleLoading(false); }
   };
   return <div className="page-view profile-page"><div className="page-title"><div><span className="eyebrow">{lang === "fr" ? "PERSONNALISATION & IA" : "PERSONALIZATION & AI"}</span><h1>{t.channelProfile}</h1><p>{lang === "fr" ? "Configurez les modèles utilisés pour le packaging et les miniatures." : "Configure the models used for packaging and thumbnails."}</p></div><button className="primary" onClick={done}>{t.saveProfile}</button></div>
-    <section className="form-section ai-settings-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Clés IA & modèles" : "AI keys & models"}</h2><p>{lang === "fr" ? "Les prix OpenRouter sont récupérés en direct et affichés par million de jetons." : "OpenRouter prices are fetched live and shown per million tokens."}</p></div><span className="session-badge">⌕ {lang === "fr" ? "SESSION UNIQUEMENT" : "SESSION ONLY"}</span></div>
+    <section className="form-section ai-settings-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Clés IA & modèles" : "AI keys & models"}</h2><p>{lang === "fr" ? "Les prix OpenRouter sont récupérés en direct et affichés par million de jetons." : "OpenRouter prices are fetched live and shown per million tokens."}</p></div><span className={`session-badge ${aiSettings.rememberKeys ? "remembered" : ""}`}>⌕ {aiSettings.rememberKeys ? (lang === "fr" ? "MÉMORISÉ SUR CET APPAREIL" : "REMEMBERED ON THIS DEVICE") : (lang === "fr" ? "SESSION UNIQUEMENT" : "SESSION ONLY")}</span></div>
       <div className="credential-grid">
-        <label className="credential-card"><span className="provider-mark openrouter-mark">OR</span><strong>OpenRouter</strong><small>{lang === "fr" ? "Titres, descriptions, tags, prompts et quiz" : "Titles, descriptions, tags, prompts and quizzes"}</small><span className="field-label">API KEY</span><input type="password" autoComplete="off" spellCheck={false} value={aiSettings.openrouterKey} onChange={event => setAiSettings({ ...aiSettings, openrouterKey: event.target.value })} placeholder="sk-or-v1-••••••••" /><em className={aiSettings.openrouterKey ? "present" : ""}>● {aiSettings.openrouterKey ? (lang === "fr" ? "Clé présente en mémoire" : "Key held in memory") : (lang === "fr" ? "Clé requise" : "Key required")}</em></label>
+        <div className="credential-card"><span className="provider-mark openrouter-mark">OR</span><strong>OpenRouter</strong><small>{lang === "fr" ? "Titres, descriptions, tags, prompts et quiz" : "Titles, descriptions, tags, prompts and quizzes"}</small><label className="field-label" htmlFor="openrouter-api-key">API KEY</label><input id="openrouter-api-key" type="password" autoComplete="off" spellCheck={false} value={aiSettings.openrouterKey} onChange={event => { setAiSettings({ ...aiSettings, openrouterKey: event.target.value }); setOpenRouterKeyStatus("idle"); }} placeholder="sk-or-v1-••••••••" /><div className="credential-status-row"><em className={openRouterKeyStatus === "invalid" ? "invalid" : aiSettings.openrouterKey ? "present" : ""}>● {openRouterKeyStatus === "valid" ? `${lang === "fr" ? "Clé valide" : "Valid key"}${openRouterKeyLabel ? ` · ${openRouterKeyLabel}` : ""}` : openRouterKeyStatus === "invalid" ? (lang === "fr" ? "Clé refusée par OpenRouter" : "Key rejected by OpenRouter") : aiSettings.openrouterKey ? (lang === "fr" ? "Clé saisie — test recommandé" : "Key entered — test recommended") : (lang === "fr" ? "Clé requise" : "Key required")}</em><button type="button" onClick={validateOpenRouterKey} disabled={openRouterKeyStatus === "loading" || !aiSettings.openrouterKey.trim()}>{openRouterKeyStatus === "loading" ? (lang === "fr" ? "Test…" : "Testing…") : (lang === "fr" ? "Tester la clé" : "Test key")}</button></div></div>
         <label className="credential-card"><span className="provider-mark openai-mark">AI</span><strong>OpenAI Images</strong><small>{lang === "fr" ? "Génération réelle des miniatures PNG" : "Real PNG thumbnail generation"}</small><span className="field-label">API KEY</span><input type="password" autoComplete="off" spellCheck={false} value={aiSettings.openaiKey} onChange={event => setAiSettings({ ...aiSettings, openaiKey: event.target.value })} placeholder="sk-proj-••••••••" /><em className={aiSettings.openaiKey ? "present" : ""}>● {aiSettings.openaiKey ? (lang === "fr" ? "Clé présente en mémoire" : "Key held in memory") : (lang === "fr" ? "Clé requise pour les images" : "Key required for images")}</em></label>
       </div>
+      <label className="remember-keys"><input type="checkbox" checked={aiSettings.rememberKeys} onChange={event => setAiSettings({ ...aiSettings, rememberKeys: event.target.checked })} /><span><strong>{lang === "fr" ? "Mémoriser mes clés sur cet appareil" : "Remember my keys on this device"}</strong><small>{lang === "fr" ? "Vous ne devrez plus les ressaisir après une actualisation. À activer uniquement sur votre appareil personnel." : "You will not need to enter them after a refresh. Enable only on your personal device."}</small></span></label>
       <div className="model-grid">
         <label><span>{lang === "fr" ? "Modèle de texte OpenRouter" : "OpenRouter text model"}</span><select value={aiSettings.openrouterModel} onChange={event => setAiSettings({ ...aiSettings, openrouterModel: event.target.value })}><option value="">{openRouterModels.length ? (lang === "fr" ? "Choisir un modèle" : "Choose a model") : (lang === "fr" ? "Chargement du catalogue…" : "Loading catalog…")}</option>{openRouterModels.map(model => <option key={model.id} value={model.id}>{model.name} · in {formatTokenPrice(model.inputPerToken)}/M · out {formatTokenPrice(model.outputPerToken)}/M</option>)}</select>{selectedModel && <small>{selectedModel.id} · {selectedModel.contextLength ? `${Math.round(selectedModel.contextLength / 1000)}k context` : "context n/a"} · {lang === "fr" ? "tarifs OpenRouter en direct" : "live OpenRouter pricing"}</small>}</label>
         <label><span>{lang === "fr" ? "Modèle d’image OpenAI" : "OpenAI image model"}</span><select value={aiSettings.imageModel} onChange={event => setAiSettings({ ...aiSettings, imageModel: event.target.value as AiSettings["imageModel"] })}><option value="gpt-image-2">GPT Image 2 · texte in $5/M · image in $8/M · out $30/M</option><option value="gpt-image-1.5">GPT Image 1.5 (ancien) · texte in $5/M · image in $8/M · out $32/M</option></select><small>{lang === "fr" ? "GPT Image 2 est recommandé pour les nouvelles miniatures." : "GPT Image 2 is recommended for new thumbnails."}</small></label>
         <label><span>{lang === "fr" ? "Qualité de génération" : "Generation quality"}</span><select value={aiSettings.imageQuality} onChange={event => setAiSettings({ ...aiSettings, imageQuality: event.target.value as AiSettings["imageQuality"] })}><option value="low">Low · {lang === "fr" ? "économique" : "economy"}</option><option value="medium">Medium · {lang === "fr" ? "recommandé" : "recommended"}</option><option value="high">High · {lang === "fr" ? "qualité maximale" : "maximum quality"}</option></select><small>{lang === "fr" ? "Le coût réel dépend aussi de la résolution et du nombre de jetons image." : "Actual cost also depends on resolution and image-token usage."}</small></label>
       </div>
-      <p className="privacy-note strong-privacy">⌕ {lang === "fr" ? "Vos clés ne sont pas sauvegardées dans le navigateur, les projets ou la base. Elles sont transmises uniquement au fournisseur choisi pendant l’appel et disparaissent au rechargement." : "Your keys are not saved in the browser, projects, or database. They are only forwarded to the selected provider during a request and disappear on reload."}</p>
+      <p className="privacy-note strong-privacy">⌕ {aiSettings.rememberKeys ? (lang === "fr" ? "Vos clés sont enregistrées uniquement dans le stockage local de ce navigateur. Elles ne sont jamais ajoutées aux projets ni à la base du site. Décochez l’option pour les effacer de cet appareil." : "Your keys are stored only in this browser's local storage. They are never added to projects or the site's database. Turn the option off to remove them from this device.") : (lang === "fr" ? "Vos clés restent uniquement en mémoire pendant cette session et disparaissent au rechargement." : "Your keys remain in memory only for this session and disappear on reload.")}</p>
     </section>
     <section className="form-section visual-style-section"><div className="section-heading"><div><h2>{lang === "fr" ? "ADN visuel des miniatures" : "Thumbnail visual DNA"}</h2><p>{lang === "fr" ? "Ajoutez jusqu’à 4 références. L’IA en extrait des règles éditoriales réutilisables sans copier une miniature précise." : "Add up to 4 references. AI extracts reusable editorial rules without copying a specific thumbnail."}</p></div><span className="reference-count">{referenceThumbnails.length}/4 {lang === "fr" ? "RÉFÉRENCES" : "REFERENCES"}</span></div>
       <div className="reference-grid">{referenceThumbnails.map(reference => <figure key={reference.key} className="reference-card"><img src={reference.url} alt={reference.name} /><figcaption title={reference.name}>{reference.name}</figcaption><button onClick={() => deleteReference(reference)} aria-label={`${lang === "fr" ? "Supprimer" : "Remove"} ${reference.name}`}>×</button></figure>)}{referenceThumbnails.length < 4 && <label className="reference-upload"><input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={event => { uploadReferences(event.target.files); event.target.value = ""; }} /><span>＋</span><strong>{uploading ? (lang === "fr" ? "Import…" : "Uploading…") : (lang === "fr" ? "Ajouter des références" : "Add references")}</strong><small>PNG, JPG ou WebP · 4 max.</small></label>}</div>

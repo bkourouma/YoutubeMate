@@ -13,6 +13,10 @@ type RequestBody = {
   profile?: { channel?: string; theme?: string; audience?: string; tone?: string };
 };
 
+function normalizeApiKey(value?: string) {
+  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
+}
+
 function parseJsonContent(content: string) {
   const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
   return JSON.parse((fenced ?? content).trim()) as { hook?: unknown; promise?: unknown };
@@ -24,7 +28,7 @@ function countWords(value: string) {
 
 export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
-  const apiKey = body.apiKey?.trim();
+  const apiKey = normalizeApiKey(body.apiKey);
   const model = body.model?.trim();
   const subject = body.subject?.trim() ?? "";
   const action = body.action === "iterate" ? "iterate" : "generate";

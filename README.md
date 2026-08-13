@@ -24,9 +24,12 @@ profil de chaîne sont sauvegardés par utilisateur.
   que l'utilisateur peut modifier ou améliorer par itérations.
 - Les références et le prompt système sont appliqués automatiquement aux
   générations OpenAI suivantes.
-- Les clés OpenRouter et OpenAI saisies dans le profil restent uniquement dans
-  la mémoire de l'onglet. Elles ne sont jamais ajoutées au workspace, à D1 ou
-  au stockage du navigateur.
+- Par défaut, les clés OpenRouter et OpenAI restent uniquement dans la mémoire
+  de l'onglet. L'utilisateur peut choisir de les mémoriser dans le stockage
+  local de son navigateur personnel ; elles ne sont jamais ajoutées au
+  workspace ni à D1.
+- Le profil peut vérifier une clé OpenRouter sans lancer de génération et
+  signale clairement une clé refusée ou expirée.
 - Les scores de titre sont relayés depuis vidIQ sans estimation locale.
 
 ## Hook et introduction assistés par IA

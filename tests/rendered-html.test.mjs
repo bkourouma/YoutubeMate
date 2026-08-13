@@ -42,11 +42,12 @@ test("removes disposable starter assets and keeps product metadata", async () =>
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
 });
 
-test("wires real AI packaging, hook iteration, reference analysis, and image generation", async () => {
-  const [studio, modelsRoute, textRoute, hookRoute, imageRoute, referenceRoute, styleRoute, hosting] = await Promise.all([
+test("wires real AI packaging, key validation, hook iteration, reference analysis, and image generation", async () => {
+  const [studio, modelsRoute, textRoute, keyRoute, hookRoute, imageRoute, referenceRoute, styleRoute, hosting] = await Promise.all([
     readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openrouter-models/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/openrouter-key/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/studio-hook/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openai-image/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/reference-thumbnails/route.ts", import.meta.url), "utf8"),
@@ -56,7 +57,10 @@ test("wires real AI packaging, hook iteration, reference analysis, and image gen
   assert.match(studio, /Clés IA & modèles/);
   assert.match(studio, /in \{formatTokenPrice\(model\.inputPerToken\)\}\/M/);
   assert.match(studio, /Miniatures générées par OpenAI/);
-  assert.match(studio, /SESSION UNIQUEMENT/);
+  assert.match(studio, /MÉMORISÉ SUR CET APPAREIL/);
+  assert.match(studio, /Mémoriser mes clés sur cet appareil/);
+  assert.match(studio, /Tester la clé/);
+  assert.match(studio, /script-studio-ai-credentials/);
   assert.match(studio, /ADN visuel des miniatures/);
   assert.match(studio, /Itérer avec l’IA/);
   assert.match(studio, /Bloc automatique de description/);
@@ -68,6 +72,8 @@ test("wires real AI packaging, hook iteration, reference analysis, and image gen
   assert.match(studio, /Appliquer mes orientations/);
   assert.match(modelsRoute, /openrouter\.ai\/api\/v1\/models\?sort=most-popular&supported_parameters=response_format/);
   assert.match(textRoute, /openrouter\.ai\/api\/v1\/chat\/completions/);
+  assert.match(keyRoute, /openrouter\.ai\/api\/v1\/key/);
+  assert.match(keyRoute, /openrouter_key_rejected/);
   assert.match(textRoute, /"options":\["answer A","answer B","answer C"\]/);
   assert.match(textRoute, /correctOption/);
   assert.match(textRoute, /descriptionFooter/);

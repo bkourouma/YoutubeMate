@@ -13,9 +13,13 @@ function parseJsonContent(content: string) {
   return JSON.parse((fenced ?? content).trim());
 }
 
+function normalizeApiKey(value?: string) {
+  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
+}
+
 export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
-  const apiKey = body.apiKey?.trim();
+  const apiKey = normalizeApiKey(body.apiKey);
   const source = body.source?.trim() ?? "";
   const model = body.model?.trim();
   if (!apiKey || !model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });

@@ -14,6 +14,10 @@ type ImageRequest = {
 
 const ALLOWED_MODELS = new Set(["gpt-image-2", "gpt-image-1.5"]);
 
+function normalizeApiKey(value?: string) {
+  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
+}
+
 async function referencePrefix() {
   const requestHeaders = await headers();
   const userId = requestHeaders.get("oai-authenticated-user-id") ?? "local-preview";
@@ -22,7 +26,7 @@ async function referencePrefix() {
 
 export async function POST(request: Request) {
   const body = await request.json() as ImageRequest;
-  const apiKey = body.apiKey?.trim();
+  const apiKey = normalizeApiKey(body.apiKey);
   const model = body.model?.trim() ?? "gpt-image-2";
   const prompt = body.prompt?.trim() ?? "";
   if (!apiKey) return Response.json({ error: "openai_key_required" }, { status: 400 });
