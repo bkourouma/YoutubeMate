@@ -2,7 +2,7 @@ type OpenRouterModel = {
   id?: string;
   name?: string;
   context_length?: number;
-  architecture?: { output_modalities?: string[] };
+  architecture?: { input_modalities?: string[]; output_modalities?: string[] };
   pricing?: { prompt?: string; completion?: string };
 };
 
@@ -26,6 +26,7 @@ export async function GET() {
         contextLength: model.context_length ?? null,
         inputPerToken: Number(model.pricing?.prompt ?? 0),
         outputPerToken: Number(model.pricing?.completion ?? 0),
+        supportsImages: model.architecture?.input_modalities?.includes("image") ?? false,
       }));
     return Response.json({ models, updatedAt: new Date().toISOString() });
   } catch {

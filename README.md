@@ -12,6 +12,11 @@ profil de chaîne sont sauvegardés par utilisateur.
   en direct depuis l'API officielle.
 - OpenAI Images génère les trois miniatures choisies, téléchargeables en PNG
   1280 × 720.
+- Le profil accepte jusqu'à 4 miniatures de référence stockées dans l'espace
+  privé. Un modèle vision OpenRouter les transforme en prompt système éditorial
+  que l'utilisateur peut modifier ou améliorer par itérations.
+- Les références et le prompt système sont appliqués automatiquement aux
+  générations OpenAI suivantes.
 - Les clés OpenRouter et OpenAI saisies dans le profil restent uniquement dans
   la mémoire de l'onglet. Elles ne sont jamais ajoutées au workspace, à D1 ou
   au stockage du navigateur.

@@ -41,19 +41,29 @@ test("removes disposable starter assets and keeps product metadata", async () =>
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
 });
 
-test("wires real AI packaging, model pricing, and image generation", async () => {
-  const [studio, modelsRoute, textRoute, imageRoute] = await Promise.all([
+test("wires real AI packaging, reference analysis, and image generation", async () => {
+  const [studio, modelsRoute, textRoute, imageRoute, referenceRoute, styleRoute, hosting] = await Promise.all([
     readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openrouter-models/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openai-image/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/reference-thumbnails/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/reference-style/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
   ]);
   assert.match(studio, /Clés IA & modèles/);
   assert.match(studio, /in \{formatTokenPrice\(model\.inputPerToken\)\}\/M/);
   assert.match(studio, /Miniatures générées par OpenAI/);
   assert.match(studio, /SESSION UNIQUEMENT/);
+  assert.match(studio, /ADN visuel des miniatures/);
+  assert.match(studio, /Itérer avec l’IA/);
   assert.match(modelsRoute, /openrouter\.ai\/api\/v1\/models\?sort=most-popular&supported_parameters=response_format/);
   assert.match(textRoute, /openrouter\.ai\/api\/v1\/chat\/completions/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/generations/);
+  assert.match(imageRoute, /api\.openai\.com\/v1\/images\/edits/);
   assert.match(imageRoute, /gpt-image-2/);
+  assert.match(referenceRoute, /BUCKET/);
+  assert.match(styleRoute, /image_url/);
+  assert.match(styleRoute, /reference-thumbnails/);
+  assert.match(hosting, /"r2": "BUCKET"/);
 });

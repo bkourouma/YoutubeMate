@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element, jsx-a11y/label-has-associated-control */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Lang = "fr" | "en";
 type View = "studio" | "express" | "projects" | "profile";
@@ -11,6 +11,7 @@ type Profile = {
   channel: string; theme: string; primary: string; secondary: string; audience: string;
   tone: string; presentation: string; launch: string; closing: string; contacts: string;
   offer: string; duration: string; youtubeConnected: boolean; vidiqConnected: boolean;
+  thumbnailSystemPrompt?: string;
 };
 
 type Project = {
@@ -29,10 +30,11 @@ type PackagingResult = {
   quiz: Array<{ question: string; answer: string }>;
 };
 type OpenRouterModel = {
-  id: string; name: string; contextLength: number | null; inputPerToken: number; outputPerToken: number;
+  id: string; name: string; contextLength: number | null; inputPerToken: number; outputPerToken: number; supportsImages: boolean;
 };
+type ReferenceThumbnail = { key: string; name: string; contentType: string; size: number; uploadedAt: string; url: string };
 type AiSettings = {
-  openaiKey: string; openrouterKey: string; openrouterModel: string;
+  openaiKey: string; openrouterKey: string; openrouterModel: string; visionModel: string;
   imageModel: "gpt-image-2" | "gpt-image-1.5"; imageQuality: "low" | "medium" | "high";
 };
 
@@ -70,7 +72,7 @@ const profileDemo: Profile = {
   closing: "Si tu as aimé, liker et n'oublie pas de t'abonner pour recevoir nos prochaines vidéos.",
   contacts: "Consultance +225 07 07 66 41 05 · allianceconsultants.net · Groupe WhatsApp",
   offer: "Entreprises : diagnostic IA, agents IA sur mesure et formation. Indépendants : accompagnement individuel et assistant IA métier.",
-  duration: "8–12 minutes", youtubeConnected: false, vidiqConnected: false,
+  duration: "8–12 minutes", youtubeConnected: false, vidiqConnected: false, thumbnailSystemPrompt: "",
 };
 
 const demoProjects: Project[] = [
@@ -98,8 +100,9 @@ export default function ScriptStudio() {
   const [profile, setProfile] = useState(profileDemo);
   const [projects, setProjects] = useState(demoProjects);
   const [express, setExpress] = useState<ExpressState>(expressDefault);
-  const [aiSettings, setAiSettings] = useState<AiSettings>({ openaiKey: "", openrouterKey: "", openrouterModel: "", imageModel: "gpt-image-2", imageQuality: "medium" });
+  const [aiSettings, setAiSettings] = useState<AiSettings>({ openaiKey: "", openrouterKey: "", openrouterModel: "", visionModel: "", imageModel: "gpt-image-2", imageQuality: "medium" });
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
+  const [referenceThumbnails, setReferenceThumbnails] = useState<ReferenceThumbnail[]>([]);
   const [activeId, setActiveId] = useState(demoProjects[0].id);
   const [auto, setAuto] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -111,6 +114,9 @@ export default function ScriptStudio() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const t = labels[lang];
   const project = projects.find(p => p.id === activeId) ?? projects[0];
+  const loadReferenceThumbnails = useCallback(() => {
+    fetch("/api/reference-thumbnails").then(response => response.json() as Promise<{ references?: ReferenceThumbnail[] }>).then(data => setReferenceThumbnails(data.references ?? [])).catch(() => null);
+  }, []);
 
   useEffect(() => {
     const local = localStorage.getItem("script-studio-workspace");
@@ -129,9 +135,15 @@ export default function ScriptStudio() {
     fetch("/api/openrouter-models").then(response => response.json() as Promise<{ models?: OpenRouterModel[] }>).then(data => {
       const models = data.models ?? [];
       setOpenRouterModels(models);
-      setAiSettings(current => current.openrouterModel || !models[0] ? current : { ...current, openrouterModel: models[0].id });
+      setAiSettings(current => ({
+        ...current,
+        openrouterModel: current.openrouterModel || models[0]?.id || "",
+        visionModel: current.visionModel || models.find(model => model.supportsImages)?.id || "",
+      }));
     }).catch(() => null);
   }, []);
+
+  useEffect(() => { loadReferenceThumbnails(); }, [loadReferenceThumbnails]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -221,8 +233,8 @@ export default function ScriptStudio() {
           </div>
         </>}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
-        {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} openAiSettings={() => setView("profile")} />}
-        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} openRouterModels={openRouterModels} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
+        {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} />}
+        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
       </main>
       {newOpen && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title"><button className="modal-close" onClick={() => setNewOpen(false)}>×</button><span className="eyebrow">{lang === "fr" ? "NOUVEAU PROJET" : "NEW PROJECT"}</span><h2 id="new-project-title">{t.addSubject}</h2><p>{lang === "fr" ? "Soyez précis : le studio ne recherchera jamais une catégorie plus large." : "Be specific: the studio will never research a broader category."}</p><textarea value={newSubject} onChange={e => setNewSubject(e.target.value)} placeholder={lang === "fr" ? "Ex. Comment utiliser l’IA pour répondre aux clients sur WhatsApp Business" : "E.g. How to use AI to answer customers on WhatsApp Business"} /><div className="modal-actions"><button className="ghost" onClick={() => setNewOpen(false)}>{t.cancel}</button><button className="primary" onClick={createProject}>{t.create} →</button></div></div></div>}
       {toast && <div className="toast">✓ {toast}</div>}
@@ -249,9 +261,9 @@ function EmptyGenerate({ onClick, t, lang }: { onClick: () => void; t: (typeof l
 function OutputBlock({ label, value, onChange, copy, meta, rows = 5 }: { label: string; value: string; onChange: (v: string) => void; copy: () => void; meta?: React.ReactNode; rows?: number }) { return <div className="output-block"><div className="output-label"><span>{label}</span><div>{meta}<button onClick={copy}>⧉ Copier</button></div></div><textarea value={value} onChange={e => onChange(e.target.value)} rows={rows} /></div>; }
 function Review({ status, label, detail }: { status: "ok" | "warn"; label: string; detail?: string }) { return <div className={`review ${status}`}><span>{status === "ok" ? "✓" : "!"}</span><div><strong>{label}</strong>{detail && <small>{detail}</small>}</div></div>; }
 
-function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, openAiSettings }: {
+function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, referenceThumbnails, openAiSettings }: {
   value: ExpressState; setValue: (value: ExpressState) => void; profile: Profile; lang: Lang;
-  copy: (value: string) => void; showToast: (value: string) => void; aiSettings: AiSettings; openAiSettings: () => void;
+  copy: (value: string) => void; showToast: (value: string) => void; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void;
 }) {
   const [loading, setLoading] = useState<"package" | "images" | null>(null);
   const [images, setImages] = useState<Record<string, string>>({});
@@ -265,7 +277,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     try {
       const response = await fetch("/api/openrouter-generate", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone } }),
+        body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt } }),
       });
       const data = await response.json() as { result?: PackagingResult; error?: string; detail?: string };
       if (!response.ok || !data.result) throw new Error(data.detail || data.error || "generation_failed");
@@ -301,7 +313,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
         const concept = option.concepts[conceptIndex];
         const response = await fetch("/api/openai-image", {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ apiKey: aiSettings.openaiKey, model: aiSettings.imageModel, quality: aiSettings.imageQuality, prompt: concept.prompt, overlay: option.overlay, channel: profile.channel }),
+          body: JSON.stringify({ apiKey: aiSettings.openaiKey, model: aiSettings.imageModel, quality: aiSettings.imageQuality, prompt: concept.prompt, overlay: option.overlay, channel: profile.channel, systemPrompt: profile.thumbnailSystemPrompt, referenceKeys: referenceThumbnails.map(reference => reference.key) }),
         });
         const data = await response.json() as { image?: string; error?: string; detail?: string };
         if (!response.ok || !data.image) throw new Error(data.detail || data.error || `image_${option.id}_failed`);
@@ -347,6 +359,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     <section className="express-section"><div className="express-section-title"><span>01</span><div><h2>{lang === "fr" ? "Tests A/B/C" : "A/B/C tests"}</h2><p>{lang === "fr" ? "Choisissez un concept visuel pour chaque paire titre–description." : "Choose one visual concept for each title–description pair."}</p></div><button className={`vidiq-sync ${value.vidiqStatus || "idle"}`} onClick={() => syncVidiqScores(pack.options)} disabled={value.vidiqStatus === "loading"}>{value.vidiqStatus === "loading" ? (lang === "fr" ? "Synchronisation…" : "Syncing…") : (lang === "fr" ? "Synchroniser les scores vidIQ" : "Sync vidIQ scores")}</button></div>
       <div className="ab-options">{pack.options.map(option => <article className="ab-option" key={option.id}><div className="ab-option-head"><span>OPTION {option.id}</span><small>{option.register}</small></div><div className={`vidiq-score ${value.vidiqScores?.[option.id] !== undefined ? "ready" : "pending"}`}><b>{value.vidiqScores?.[option.id] ?? "—"}</b><span>{value.vidiqScores?.[option.id] !== undefined ? "/100 · vidIQ" : (lang === "fr" ? "score vidIQ en attente" : "vidIQ score pending")}</span></div><h3>{option.title}</h3><p>{option.description}</p><div className="copy-row"><button onClick={() => copy(option.title)}>⧉ {lang === "fr" ? "Titre" : "Title"}</button><button onClick={() => copy(option.description)}>⧉ Description</button></div><div className="concept-list"><strong>{lang === "fr" ? "3 concepts de miniature" : "3 thumbnail concepts"}</strong>{option.concepts.map((concept, index) => <button className={value.selected[option.id] === index ? "selected" : ""} key={`${option.id}-${index}`} onClick={() => { update({ selected: { ...value.selected, [option.id]: index }, thumbnailsGenerated: false }); setImages({}); }}><span>{value.selected[option.id] === index ? "✓" : index + 1}</span><div><b>{concept.name}</b><small>{concept.prompt}</small></div></button>)}</div></article>)}</div>
       <div className="vidiq-truth-note">◆ {value.vidiqStatus === "error" ? (lang === "fr" ? "vidIQ n’a renvoyé aucun score. Aucun remplacement n’est affiché." : "vidIQ returned no score. No replacement is displayed.") : (lang === "fr" ? "Les valeurs vidIQ sont affichées telles quelles, sans estimation locale." : "vidIQ values are shown exactly as returned, with no local estimate.")}</div>
+      {(referenceThumbnails.length > 0 || profile.thumbnailSystemPrompt) && <div className="visual-dna-active">◆ {lang === "fr" ? "ADN visuel actif" : "Visual DNA active"} · {referenceThumbnails.length} {lang === "fr" ? "référence(s)" : "reference(s)"} · {profile.thumbnailSystemPrompt ? (lang === "fr" ? "prompt système appliqué" : "system prompt applied") : (lang === "fr" ? "prompt système à générer" : "system prompt pending")}</div>}
       <button className="primary thumbnail-cta" onClick={() => generateThumbnails(pack.options)} disabled={loading !== null}>✦ {loading === "images" ? (lang === "fr" ? "OpenAI génère 3 images…" : "OpenAI is generating 3 images…") : (lang === "fr" ? "Générer les 3 vraies miniatures" : "Generate 3 real thumbnails")}</button>
       {!aiSettings.openaiKey && <button className="inline-config" onClick={openAiSettings}>{lang === "fr" ? "Ajouter la clé OpenAI" : "Add OpenAI key"} →</button>}
     </section>
@@ -477,12 +490,68 @@ function formatTokenPrice(perToken: number) {
   return `$${perMillion < 0.01 ? perMillion.toFixed(4) : perMillion < 1 ? perMillion.toFixed(2) : perMillion.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
-function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, openRouterModels, done }: {
+async function optimizeReferenceImage(file: File) {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / bitmap.width, 900 / bitmap.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/jpeg", .84));
+    return blob ? new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
+  } catch { return file; }
+}
+
+function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, openRouterModels, referenceThumbnails, reloadReferences, showToast, done }: {
   profile: Profile; setProfile: (p: Profile) => void; lang: Lang; t: (typeof labels)[Lang];
-  aiSettings: AiSettings; setAiSettings: (settings: AiSettings) => void; openRouterModels: OpenRouterModel[]; done: () => void;
+  aiSettings: AiSettings; setAiSettings: (settings: AiSettings) => void; openRouterModels: OpenRouterModel[];
+  referenceThumbnails: ReferenceThumbnail[]; reloadReferences: () => void; showToast: (message: string) => void; done: () => void;
 }) {
   const field = (key: keyof Profile, value: string | boolean) => setProfile({ ...profile, [key]: value });
   const selectedModel = openRouterModels.find(model => model.id === aiSettings.openrouterModel);
+  const visionModels = openRouterModels.filter(model => model.supportsImages);
+  const selectedVisionModel = visionModels.find(model => model.id === aiSettings.visionModel);
+  const [styleLoading, setStyleLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [iteration, setIteration] = useState("");
+  const uploadReferences = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const available = 4 - referenceThumbnails.length;
+    if (available <= 0) return showToast(lang === "fr" ? "Maximum 4 miniatures de référence." : "Maximum 4 reference thumbnails.");
+    setUploading(true);
+    try {
+      const form = new FormData();
+      for (const file of Array.from(files).slice(0, available)) form.append("files", await optimizeReferenceImage(file));
+      const response = await fetch("/api/reference-thumbnails", { method: "POST", body: form });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error || "upload_failed");
+      reloadReferences();
+      showToast(lang === "fr" ? "Miniatures de référence ajoutées" : "Reference thumbnails added");
+    } catch (error) { showToast(lang === "fr" ? `Import impossible : ${error instanceof Error ? error.message : "erreur"}` : `Upload failed: ${error instanceof Error ? error.message : "error"}`); }
+    finally { setUploading(false); }
+  };
+  const deleteReference = async (reference: ReferenceThumbnail) => {
+    const response = await fetch(`/api/reference-thumbnails?key=${encodeURIComponent(reference.key)}`, { method: "DELETE" });
+    if (response.ok) { reloadReferences(); showToast(lang === "fr" ? "Référence supprimée" : "Reference removed"); }
+  };
+  const generateEditorialPrompt = async (iterate = false) => {
+    if (!aiSettings.openrouterKey || !aiSettings.visionModel) return showToast(lang === "fr" ? "Ajoutez la clé OpenRouter et choisissez un modèle vision." : "Add an OpenRouter key and choose a vision model.");
+    if (!referenceThumbnails.length) return showToast(lang === "fr" ? "Ajoutez d’abord une miniature de référence." : "Add a reference thumbnail first.");
+    setStyleLoading(true);
+    try {
+      const response = await fetch("/api/reference-style", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.visionModel, referenceKeys: referenceThumbnails.map(reference => reference.key), currentPrompt: iterate ? profile.thumbnailSystemPrompt : "", instruction: iterate ? iteration : "", language: lang, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone } }) });
+      const data = await response.json() as { prompt?: string; error?: string; detail?: string };
+      if (!response.ok || !data.prompt) throw new Error(data.detail || data.error || "analysis_failed");
+      field("thumbnailSystemPrompt", data.prompt);
+      setIteration("");
+      showToast(iterate ? (lang === "fr" ? "Prompt système amélioré" : "System prompt improved") : (lang === "fr" ? "ADN visuel généré" : "Visual DNA generated"));
+    } catch (error) { showToast(`OpenRouter : ${error instanceof Error ? error.message : "analyse impossible"}`); }
+    finally { setStyleLoading(false); }
+  };
   return <div className="page-view profile-page"><div className="page-title"><div><span className="eyebrow">{lang === "fr" ? "PERSONNALISATION & IA" : "PERSONALIZATION & AI"}</span><h1>{t.channelProfile}</h1><p>{lang === "fr" ? "Configurez les modèles utilisés pour le packaging et les miniatures." : "Configure the models used for packaging and thumbnails."}</p></div><button className="primary" onClick={done}>{t.saveProfile}</button></div>
     <section className="form-section ai-settings-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Clés IA & modèles" : "AI keys & models"}</h2><p>{lang === "fr" ? "Les prix OpenRouter sont récupérés en direct et affichés par million de jetons." : "OpenRouter prices are fetched live and shown per million tokens."}</p></div><span className="session-badge">⌕ {lang === "fr" ? "SESSION UNIQUEMENT" : "SESSION ONLY"}</span></div>
       <div className="credential-grid">
@@ -495,6 +564,13 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
         <label><span>{lang === "fr" ? "Qualité de génération" : "Generation quality"}</span><select value={aiSettings.imageQuality} onChange={event => setAiSettings({ ...aiSettings, imageQuality: event.target.value as AiSettings["imageQuality"] })}><option value="low">Low · {lang === "fr" ? "économique" : "economy"}</option><option value="medium">Medium · {lang === "fr" ? "recommandé" : "recommended"}</option><option value="high">High · {lang === "fr" ? "qualité maximale" : "maximum quality"}</option></select><small>{lang === "fr" ? "Le coût réel dépend aussi de la résolution et du nombre de jetons image." : "Actual cost also depends on resolution and image-token usage."}</small></label>
       </div>
       <p className="privacy-note strong-privacy">⌕ {lang === "fr" ? "Vos clés ne sont pas sauvegardées dans le navigateur, les projets ou la base. Elles sont transmises uniquement au fournisseur choisi pendant l’appel et disparaissent au rechargement." : "Your keys are not saved in the browser, projects, or database. They are only forwarded to the selected provider during a request and disappear on reload."}</p>
+    </section>
+    <section className="form-section visual-style-section"><div className="section-heading"><div><h2>{lang === "fr" ? "ADN visuel des miniatures" : "Thumbnail visual DNA"}</h2><p>{lang === "fr" ? "Ajoutez jusqu’à 4 références. L’IA en extrait des règles éditoriales réutilisables sans copier une miniature précise." : "Add up to 4 references. AI extracts reusable editorial rules without copying a specific thumbnail."}</p></div><span className="reference-count">{referenceThumbnails.length}/4 {lang === "fr" ? "RÉFÉRENCES" : "REFERENCES"}</span></div>
+      <div className="reference-grid">{referenceThumbnails.map(reference => <figure key={reference.key} className="reference-card"><img src={reference.url} alt={reference.name} /><figcaption title={reference.name}>{reference.name}</figcaption><button onClick={() => deleteReference(reference)} aria-label={`${lang === "fr" ? "Supprimer" : "Remove"} ${reference.name}`}>×</button></figure>)}{referenceThumbnails.length < 4 && <label className="reference-upload"><input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={event => { uploadReferences(event.target.files); event.target.value = ""; }} /><span>＋</span><strong>{uploading ? (lang === "fr" ? "Import…" : "Uploading…") : (lang === "fr" ? "Ajouter des références" : "Add references")}</strong><small>PNG, JPG ou WebP · 4 max.</small></label>}</div>
+      <div className="vision-controls"><label><span>{lang === "fr" ? "Modèle vision OpenRouter pour l’analyse" : "OpenRouter vision model for analysis"}</span><select value={aiSettings.visionModel} onChange={event => setAiSettings({ ...aiSettings, visionModel: event.target.value })}><option value="">{visionModels.length ? (lang === "fr" ? "Choisir un modèle vision" : "Choose a vision model") : (lang === "fr" ? "Chargement des modèles vision…" : "Loading vision models…")}</option>{visionModels.map(model => <option key={model.id} value={model.id}>{model.name} · in {formatTokenPrice(model.inputPerToken)}/M · out {formatTokenPrice(model.outputPerToken)}/M</option>)}</select>{selectedVisionModel && <small>{selectedVisionModel.id} · {lang === "fr" ? "entrée image compatible" : "image input supported"}</small>}</label><button className="primary" onClick={() => generateEditorialPrompt(false)} disabled={styleLoading || uploading || !referenceThumbnails.length}>{styleLoading ? (lang === "fr" ? "Analyse des références…" : "Analyzing references…") : (profile.thumbnailSystemPrompt ? (lang === "fr" ? "Régénérer depuis les références" : "Regenerate from references") : (lang === "fr" ? "Générer le prompt système" : "Generate system prompt"))}</button></div>
+      <label className="system-prompt-editor"><span>{lang === "fr" ? "Prompt système éditorial — modifiable" : "Editorial system prompt — editable"}</span><textarea value={profile.thumbnailSystemPrompt ?? ""} onChange={event => field("thumbnailSystemPrompt", event.target.value)} rows={14} placeholder={lang === "fr" ? "Le prompt généré décrira la composition, la hiérarchie, les couleurs, la typographie, les visages, le contraste et les règles à éviter…" : "The generated prompt will describe composition, hierarchy, colors, typography, faces, contrast, and rules to avoid…"} /><small>{lang === "fr" ? "Vous pouvez tout modifier manuellement. Ce texte sera appliqué aux concepts et à chaque génération OpenAI." : "You can edit everything manually. This text is applied to concepts and every OpenAI generation."}</small></label>
+      {profile.thumbnailSystemPrompt && <div className="prompt-iteration"><label><span>{lang === "fr" ? "Demander une amélioration" : "Request an improvement"}</span><input value={iteration} onChange={event => setIteration(event.target.value)} placeholder={lang === "fr" ? "Ex. plus de contraste, moins de texte, visages plus naturels…" : "E.g. more contrast, less text, more natural faces…"} /></label><button onClick={() => generateEditorialPrompt(true)} disabled={styleLoading || !iteration.trim()}>↻ {lang === "fr" ? "Itérer avec l’IA" : "Iterate with AI"}</button></div>}
+      <p className="privacy-note">⌕ {lang === "fr" ? "Les références sont stockées dans votre espace privé. Elles servent à l’analyse et sont envoyées à OpenAI comme références lorsque vous générez une miniature." : "References are stored in your private workspace. They are used for analysis and sent to OpenAI as references when generating a thumbnail."}</p>
     </section>
     <section className="form-section"><h2>{lang === "fr" ? "Identité éditoriale" : "Editorial identity"}</h2><div className="form-grid"><Field label={lang === "fr" ? "Nom de la chaîne" : "Channel name"} value={profile.channel} set={v => field("channel", v)} /><Field label={lang === "fr" ? "Thématique" : "Topic"} value={profile.theme} set={v => field("theme", v)} /><Field label={t.primaryLang} value={profile.primary} set={v => field("primary", v)} /><Field label={t.secondaryLang} value={profile.secondary} set={v => field("secondary", v)} /><Field label={t.audience} value={profile.audience} set={v => field("audience", v)} wide textarea /><Field label={t.tone} value={profile.tone} set={v => field("tone", v)} wide textarea /><Field label={t.duration} value={profile.duration} set={v => field("duration", v)} /></div></section>
     <section className="form-section protected"><div className="section-heading"><div><h2>{t.fixedText}</h2><p>{lang === "fr" ? "Le studio les reproduit exactement, sans reformulation." : "The studio reproduces these exactly, without rewriting."}</p></div><span>⌕ {lang === "fr" ? "PROTÉGÉ" : "PROTECTED"}</span></div><Field label={lang === "fr" ? "Texte de présentation" : "Introduction copy"} value={profile.presentation} set={v => field("presentation", v)} wide textarea /><div className="form-grid"><Field label={lang === "fr" ? "Phrase de lancement" : "Launch line"} value={profile.launch} set={v => field("launch", v)} /><Field label={lang === "fr" ? "Phrase de clôture" : "Closing line"} value={profile.closing} set={v => field("closing", v)} /></div></section>

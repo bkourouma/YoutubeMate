@@ -5,7 +5,7 @@ type RequestBody = {
   inputType?: "script" | "description";
   subject?: string;
   source?: string;
-  profile?: { channel?: string; theme?: string; audience?: string; tone?: string };
+  profile?: { channel?: string; theme?: string; audience?: string; tone?: string; thumbnailSystemPrompt?: string };
 };
 
 function parseJsonContent(content: string) {
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   }`;
   const instructions = `You are a senior YouTube packaging strategist. Return only valid JSON matching this schema: ${schema}
 Rules: write viewer-facing copy in ${language}; create exactly 3 options with ids A, B, C; each option must contain exactly 3 distinct thumbnail concepts; every image prompt must be in English, composed for a 16:9 YouTube thumbnail, high contrast, clear focal subject, no logo, no watermark, and no text because headline text is added separately; produce 8-15 relevant tags; never invent facts, figures, links, offers or promises not found in the source. ${hasScript ? "Create exactly 5 quiz questions and answers, with every answer strictly supported by the script." : "Return an empty quiz array."}`;
-  const context = `CHANNEL: ${body.profile?.channel ?? ""}\nTHEME: ${body.profile?.theme ?? ""}\nAUDIENCE: ${body.profile?.audience ?? ""}\nTONE: ${body.profile?.tone ?? ""}\nSUBJECT: ${body.subject ?? ""}\nSOURCE TYPE: ${hasScript ? "script" : "description"}\nSOURCE:\n${source}`;
+  const context = `CHANNEL: ${body.profile?.channel ?? ""}\nTHEME: ${body.profile?.theme ?? ""}\nAUDIENCE: ${body.profile?.audience ?? ""}\nTONE: ${body.profile?.tone ?? ""}\nTHUMBNAIL EDITORIAL SYSTEM: ${body.profile?.thumbnailSystemPrompt ?? "Not defined"}\nSUBJECT: ${body.subject ?? ""}\nSOURCE TYPE: ${hasScript ? "script" : "description"}\nSOURCE:\n${source}`;
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
