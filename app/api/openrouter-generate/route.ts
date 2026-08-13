@@ -30,15 +30,18 @@ export async function POST(request: Request) {
       "register": "short positioning",
       "title": "YouTube title",
       "description": "A/B test description, 1-2 sentences",
+      "englishTitle": "natural English translation of the YouTube title",
+      "englishDescription": "natural English translation of the A/B test description",
       "overlay": "2-5 WORD THUMBNAIL HEADLINE",
       "concepts": [{"name":"short concept name","prompt":"detailed English image prompt"}]
     }],
     "improvedDescription": "complete YouTube description",
     "tags": ["tag"],
+    "pinnedComment": "short comment to pin below the video",
     "quiz": [{"question":"question","options":["answer A","answer B","answer C"],"correctOption":0}]
   }`;
   const instructions = `You are a senior YouTube packaging strategist. Return only valid JSON matching this schema: ${schema}
-Rules: write viewer-facing copy in ${language}; create exactly 3 options with ids A, B, C; each option must contain exactly 3 distinct thumbnail concepts; every image prompt must be in English, composed for a 16:9 YouTube thumbnail, high contrast, clear focal subject, no logo, no watermark, and no text because headline text is added separately; produce 8-15 relevant tags; never invent facts, figures, links, offers or promises not found in the source. ${hasScript ? "Create exactly 5 quiz items. Every item must contain one question, exactly 3 plausible answer options, and correctOption as the zero-based index (0, 1, or 2) of the only correct option. The correct option must be strictly supported by the script. Distractors must be clearly false according to the source but not absurd." : "Return an empty quiz array."} The automatic description footer is managed by the application; do not paraphrase it.`;
+Rules: write viewer-facing copy in ${language}; create exactly 3 options with ids A, B, C; for every option also provide a fluent, natural English version in englishTitle and englishDescription so the app can reveal the vidIQ winner after scoring; each option must contain exactly 3 distinct thumbnail concepts; every image prompt must be in English, composed for a 16:9 YouTube thumbnail, high contrast, clear focal subject, no logo, no watermark, and no text because headline text is added separately; produce 8-15 relevant tags; create one concise pinnedComment in ${language}, 2-4 sentences, grounded in the source, ending with one specific question that encourages genuine replies; never invent facts, figures, links, offers or promises not found in the source. ${hasScript ? "Create exactly 5 quiz items. Every item must contain one question, exactly 3 plausible answer options, and correctOption as the zero-based index (0, 1, or 2) of the only correct option. The correct option must be strictly supported by the script. Distractors must be clearly false according to the source but not absurd." : "Return an empty quiz array."} The automatic description footer is managed by the application; do not paraphrase it.`;
   const context = `CHANNEL: ${body.profile?.channel ?? ""}\nTHEME: ${body.profile?.theme ?? ""}\nAUDIENCE: ${body.profile?.audience ?? ""}\nTONE: ${body.profile?.tone ?? ""}\nTHUMBNAIL EDITORIAL SYSTEM: ${body.profile?.thumbnailSystemPrompt ?? "Not defined"}\nAUTOMATIC DESCRIPTION FOOTER (append exactly, unchanged):\n${body.profile?.descriptionFooter ?? "None"}\nSUBJECT: ${body.subject ?? ""}\nSOURCE TYPE: ${hasScript ? "script" : "description"}\nSOURCE:\n${source}`;
 
   try {
@@ -64,9 +67,16 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
     if (!content) return Response.json({ error: "openrouter_empty_response" }, { status: 502 });
     const result = parseJsonContent(content) as {
       improvedDescription?: string;
+      pinnedComment?: string;
+      options?: Array<{ englishTitle?: string; englishDescription?: string }>;
       quiz?: Array<{ question?: string; options?: unknown[]; correctOption?: number }>;
       [key: string]: unknown;
     };
+    const validEnglishPackaging = Array.isArray(result.options) && result.options.length === 3 && result.options.every(option =>
+      typeof option.englishTitle === "string" && option.englishTitle.trim() &&
+      typeof option.englishDescription === "string" && option.englishDescription.trim()
+    );
+    if (!validEnglishPackaging || typeof result.pinnedComment !== "string" || !result.pinnedComment.trim()) return Response.json({ error: "openrouter_invalid_packaging_extras" }, { status: 502 });
     if (hasScript) {
       const validQuiz = Array.isArray(result.quiz) && result.quiz.length === 5 && result.quiz.every(item =>
         typeof item.question === "string" && item.question.trim() &&

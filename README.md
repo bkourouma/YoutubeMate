@@ -11,6 +11,10 @@ profil de chaîne sont sauvegardés par utilisateur.
   est fourni.
 - Le profil permet d'enregistrer un bloc de coordonnées, liens ou appel à
   l'action. Il est ajouté automatiquement, mot pour mot, à chaque description.
+- Après synchronisation vidIQ, le titre et la description de l'option la mieux
+  notée sont également présentés en anglais et prêts à copier.
+- Chaque packaging inclut un commentaire épinglé conçu pour lancer une
+  discussion naturelle sous la vidéo.
 - Le catalogue de modèles OpenRouter et ses prix entrée/sortie sont récupérés
   en direct depuis l'API officielle.
 - OpenAI Images génère les trois miniatures choisies, téléchargeables en PNG

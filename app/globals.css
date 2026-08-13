@@ -94,3 +94,28 @@ button { cursor:pointer; }
 .description-footer-actions button { border:1px solid #b9cdbf; border-radius:7px; background:white; color:var(--green); padding:8px 11px; font-size:8px; font-weight:800; }
 .description-footer-actions span { color:#78877f; font-size:7.5px; }
 @media (max-width:650px) { .quiz-list li { grid-template-columns:22px minmax(0,1fr); }.quiz-list li em { grid-column:2; }.description-footer-actions { align-items:flex-start; flex-direction:column; } }
+.english-winner { margin-top:12px; border:1px solid #cad8cf; border-radius:10px; padding:13px; background:linear-gradient(135deg,#f8fbf9,#f0f6f2); }
+.english-winner.pending { border-style:dashed; }
+.english-winner-head,.english-winner-head > div { display:flex; align-items:center; gap:10px; }
+.english-winner-head { justify-content:space-between; }
+.english-winner-head > div > span { display:grid; width:31px; height:31px; place-items:center; border-radius:8px; background:var(--green); color:white; font-size:8px; font-weight:900; }
+.english-winner-head strong,.english-winner-head small { display:block; }
+.english-winner-head strong { color:#243c30; font-size:10px; }
+.english-winner-head small { margin-top:2px; color:#6e7e75; font-size:7px; }
+.english-winner-head button,.english-winner-copy button { border:0; background:transparent; color:var(--green); font-size:8px; }
+.english-winner > p { margin:11px 0 0 41px; color:#6d7c74; font-size:8px; line-height:1.5; }
+.english-winner-copy { display:grid; grid-template-columns:.85fr 1.15fr; gap:10px; margin-top:12px; }
+.english-winner-copy article { position:relative; min-width:0; border:1px solid #dce6df; border-radius:8px; padding:11px 34px 11px 11px; background:white; }
+.english-winner-copy article > small { color:#8b6250; font-size:6.5px; font-weight:850; letter-spacing:1px; }
+.english-winner-copy h3 { margin:6px 0 0; color:#1d3027; font-family:Georgia,serif; font-size:14px; line-height:1.3; }
+.english-winner-copy p { margin:6px 0 0; color:#596b61; font-size:8px; line-height:1.5; }
+.english-winner-copy button { position:absolute; right:8px; top:9px; }
+.pinned-comment-card { margin-top:12px; overflow:hidden; border:1px solid #dfd7c9; border-radius:9px; background:#fffdfa; }
+.pinned-comment-card > div { display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid #eee7db; background:#fbf7f0; }
+.pinned-comment-card > div > span { font-size:16px; }
+.pinned-comment-card strong,.pinned-comment-card small { display:block; }
+.pinned-comment-card strong { color:#6b513f; font-size:7px; letter-spacing:1px; }
+.pinned-comment-card small { margin-top:2px; color:#8a7a6e; font-size:7px; }
+.pinned-comment-card button { border:0; background:transparent; color:var(--green); font-size:8px; }
+.pinned-comment-card > p { margin:0; padding:14px; color:#4f5d55; font-size:9px; line-height:1.65; white-space:pre-wrap; }
+@media (max-width:650px) { .english-winner-head { align-items:flex-start; }.english-winner-copy { grid-template-columns:1fr; }.english-winner > p { margin-left:0; }.pinned-comment-card > div { grid-template-columns:28px minmax(0,1fr); }.pinned-comment-card button { grid-column:2; justify-self:start; } }
