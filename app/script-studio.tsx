@@ -12,6 +12,7 @@ type Profile = {
   tone: string; presentation: string; launch: string; closing: string; contacts: string;
   offer: string; duration: string; youtubeConnected: boolean; vidiqConnected: boolean;
   thumbnailSystemPrompt?: string;
+  descriptionFooter?: string;
 };
 
 type Project = {
@@ -27,7 +28,7 @@ type PackagingOption = {
 };
 type PackagingResult = {
   topic: string; options: PackagingOption[]; improvedDescription: string; tags: string[];
-  quiz: Array<{ question: string; answer: string }>;
+  quiz: Array<{ question: string; options?: string[]; correctOption?: number; answer?: string }>;
 };
 type OpenRouterModel = {
   id: string; name: string; contextLength: number | null; inputPerToken: number; outputPerToken: number; supportsImages: boolean;
@@ -73,6 +74,7 @@ const profileDemo: Profile = {
   contacts: "Consultance +225 07 07 66 41 05 · allianceconsultants.net · Groupe WhatsApp",
   offer: "Entreprises : diagnostic IA, agents IA sur mesure et formation. Indépendants : accompagnement individuel et assistant IA métier.",
   duration: "8–12 minutes", youtubeConnected: false, vidiqConnected: false, thumbnailSystemPrompt: "",
+  descriptionFooter: "📞 Consulting: +225 07 07 66 41 05\n🌐 Website: allianceconsultants.net\n💬 Envol IA WhatsApp Group: https://chat.whatsapp.com/JPmF6GBrDAEB1ETlq3pWYh",
 };
 
 const demoProjects: Project[] = [
@@ -124,10 +126,10 @@ export default function ScriptStudio() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (localLang === "fr" || localLang === "en") setLang(localLang);
     if (local) {
-      try { const parsed = JSON.parse(local); setProfile(parsed.profile ?? profileDemo); setProjects(parsed.projects ?? demoProjects); setActiveId(parsed.activeId ?? demoProjects[0].id); setExpress(parsed.express ?? expressDefault); } catch { /* retain demo */ }
+      try { const parsed = JSON.parse(local); setProfile({ ...profileDemo, ...(parsed.profile ?? {}) }); setProjects(parsed.projects ?? demoProjects); setActiveId(parsed.activeId ?? demoProjects[0].id); setExpress(parsed.express ?? expressDefault); } catch { /* retain demo */ }
     }
     fetch("/api/workspace").then(r => r.json() as Promise<{ payload?: { profile: Profile; projects: Project[]; activeId: string; express?: ExpressState } }>).then(data => {
-      if (data.payload?.projects?.length) { setProfile(data.payload.profile); setProjects(data.payload.projects); setActiveId(data.payload.activeId); setExpress(data.payload.express ?? expressDefault); }
+      if (data.payload?.projects?.length) { setProfile({ ...profileDemo, ...data.payload.profile }); setProjects(data.payload.projects); setActiveId(data.payload.activeId); setExpress(data.payload.express ?? expressDefault); }
     }).catch(() => null).finally(() => setHydrated(true));
   }, []);
 
@@ -261,6 +263,17 @@ function EmptyGenerate({ onClick, t, lang }: { onClick: () => void; t: (typeof l
 function OutputBlock({ label, value, onChange, copy, meta, rows = 5 }: { label: string; value: string; onChange: (v: string) => void; copy: () => void; meta?: React.ReactNode; rows?: number }) { return <div className="output-block"><div className="output-label"><span>{label}</span><div>{meta}<button onClick={copy}>⧉ Copier</button></div></div><textarea value={value} onChange={e => onChange(e.target.value)} rows={rows} /></div>; }
 function Review({ status, label, detail }: { status: "ok" | "warn"; label: string; detail?: string }) { return <div className={`review ${status}`}><span>{status === "ok" ? "✓" : "!"}</span><div><strong>{label}</strong>{detail && <small>{detail}</small>}</div></div>; }
 
+function quizChoices(item: PackagingResult["quiz"][number], lang: Lang) {
+  if (Array.isArray(item.options) && item.options.length === 3) return item.options;
+  return [item.answer || (lang === "fr" ? "Réponse enregistrée" : "Saved answer"), lang === "fr" ? "Régénérez le packaging" : "Regenerate packaging", lang === "fr" ? "pour obtenir trois choix" : "to obtain three choices"];
+}
+
+function quizClipboard(item: PackagingResult["quiz"][number], lang: Lang) {
+  const choices = quizChoices(item, lang);
+  const letters = ["A", "B", "C"];
+  return `${item.question}\n${choices.map((choice, index) => `${letters[index]}. ${choice}`).join("\n")}\n${lang === "fr" ? "Bonne réponse" : "Correct answer"}: ${letters[item.correctOption ?? 0]}`;
+}
+
 function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, referenceThumbnails, openAiSettings }: {
   value: ExpressState; setValue: (value: ExpressState) => void; profile: Profile; lang: Lang;
   copy: (value: string) => void; showToast: (value: string) => void; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void;
@@ -277,7 +290,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     try {
       const response = await fetch("/api/openrouter-generate", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt } }),
+        body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt, descriptionFooter: profile.descriptionFooter } }),
       });
       const data = await response.json() as { result?: PackagingResult; error?: string; detail?: string };
       if (!response.ok || !data.result) throw new Error(data.detail || data.error || "generation_failed");
@@ -365,7 +378,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     </section>
     {value.thumbnailsGenerated && Object.keys(images).length === 3 && <section className="express-section generated-thumbnails"><div className="express-section-title"><span>02</span><div><h2>{lang === "fr" ? "Miniatures générées par OpenAI" : "OpenAI-generated thumbnails"}</h2><p>{lang === "fr" ? "Téléchargez chaque PNG recadré automatiquement en 1280 × 720." : "Download each PNG automatically cropped to 1280 × 720."}</p></div></div><div className="thumbnail-grid">{pack.options.map(option => <figure key={option.id} className="thumbnail-preview real-thumbnail"><img src={images[option.id]} alt={`${lang === "fr" ? "Miniature" : "Thumbnail"} ${option.id}: ${option.title}`} /><figcaption><strong>{option.overlay}</strong><span>{option.concepts[value.selected[option.id] ?? 0].name}</span></figcaption><button onClick={() => downloadThumbnail(images[option.id], option.id)}>↓ PNG · 1280 × 720</button></figure>)}</div></section>}
     <section className="express-section"><div className="express-section-title"><span>{value.thumbnailsGenerated ? "03" : "02"}</span><div><h2>{lang === "fr" ? "Description améliorée & tags" : "Improved description & tags"}</h2><p>{lang === "fr" ? "Générés par le modèle sélectionné et prêts à copier." : "Generated by the selected model and ready to copy."}</p></div></div><div className="delivery-grid"><div className="delivery-card"><div><strong>{lang === "fr" ? "DESCRIPTION AMÉLIORÉE" : "IMPROVED DESCRIPTION"}</strong><button onClick={() => copy(pack.improvedDescription)}>⧉ {lang === "fr" ? "Copier" : "Copy"}</button></div><pre>{pack.improvedDescription}</pre></div><div className="delivery-card tags-card"><div><strong>TAGS</strong><button onClick={() => copy(pack.tags.join(", "))}>⧉ {lang === "fr" ? "Copier tout" : "Copy all"}</button></div><div>{pack.tags.map(tag => <span key={tag}>{tag}</span>)}</div></div></div></section>
-    {value.inputType === "script" && <section className="express-section"><div className="express-section-title"><span>{value.thumbnailsGenerated ? "04" : "03"}</span><div><h2>{lang === "fr" ? "5 questions / réponses Quiz" : "5 quiz questions / answers"}</h2><p>{lang === "fr" ? "Chaque réponse doit être appuyée par le script fourni." : "Every answer must be supported by the supplied script."}</p></div></div><div className="quiz-list">{pack.quiz.map((item, index) => <article key={`${index}-${item.question}`}><span>{index + 1}</span><div><strong>{item.question}</strong><p>{item.answer}</p></div><button onClick={() => copy(`${item.question}\n${item.answer}`)}>⧉</button></article>)}</div></section>}
+    {value.inputType === "script" && <section className="express-section"><div className="express-section-title"><span>{value.thumbnailsGenerated ? "04" : "03"}</span><div><h2>{lang === "fr" ? "5 quiz à trois choix" : "5 three-choice quizzes"}</h2><p>{lang === "fr" ? "Chaque question propose exactement trois réponses ; la bonne est appuyée par le script." : "Each question has exactly three answers; the correct one is supported by the script."}</p></div></div><div className="quiz-list">{pack.quiz.map((item, index) => { const choices = quizChoices(item, lang); const correctOption = item.correctOption ?? 0; return <article key={`${index}-${item.question}`}><span>{index + 1}</span><div><strong>{item.question}</strong><ol>{choices.map((choice, choiceIndex) => <li className={choiceIndex === correctOption ? "correct" : ""} key={`${choiceIndex}-${choice}`}><b>{String.fromCharCode(65 + choiceIndex)}</b><span>{choice}</span>{choiceIndex === correctOption && <em>✓ {lang === "fr" ? "Bonne réponse" : "Correct"}</em>}</li>)}</ol></div><button onClick={() => copy(quizClipboard(item, lang))} aria-label={lang === "fr" ? "Copier le quiz" : "Copy quiz"}>⧉</button></article>; })}</div></section>}
   </div>;
 }
 
@@ -571,6 +584,10 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
       <label className="system-prompt-editor"><span>{lang === "fr" ? "Prompt système éditorial — modifiable" : "Editorial system prompt — editable"}</span><textarea value={profile.thumbnailSystemPrompt ?? ""} onChange={event => field("thumbnailSystemPrompt", event.target.value)} rows={14} placeholder={lang === "fr" ? "Le prompt généré décrira la composition, la hiérarchie, les couleurs, la typographie, les visages, le contraste et les règles à éviter…" : "The generated prompt will describe composition, hierarchy, colors, typography, faces, contrast, and rules to avoid…"} /><small>{lang === "fr" ? "Vous pouvez tout modifier manuellement. Ce texte sera appliqué aux concepts et à chaque génération OpenAI." : "You can edit everything manually. This text is applied to concepts and every OpenAI generation."}</small></label>
       {profile.thumbnailSystemPrompt && <div className="prompt-iteration"><label><span>{lang === "fr" ? "Demander une amélioration" : "Request an improvement"}</span><input value={iteration} onChange={event => setIteration(event.target.value)} placeholder={lang === "fr" ? "Ex. plus de contraste, moins de texte, visages plus naturels…" : "E.g. more contrast, less text, more natural faces…"} /></label><button onClick={() => generateEditorialPrompt(true)} disabled={styleLoading || !iteration.trim()}>↻ {lang === "fr" ? "Itérer avec l’IA" : "Iterate with AI"}</button></div>}
       <p className="privacy-note">⌕ {lang === "fr" ? "Les références sont stockées dans votre espace privé. Elles servent à l’analyse et sont envoyées à OpenAI comme références lorsque vous générez une miniature." : "References are stored in your private workspace. They are used for analysis and sent to OpenAI as references when generating a thumbnail."}</p>
+    </section>
+    <section className="form-section protected description-footer-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Bloc automatique de description" : "Automatic description block"}</h2><p>{lang === "fr" ? "Ajouté mot pour mot à la fin de chaque description améliorée." : "Added word for word at the end of every improved description."}</p></div><span>⌕ {lang === "fr" ? "AUTOMATIQUE" : "AUTOMATIC"}</span></div>
+      <label className="description-footer-editor"><span>{lang === "fr" ? "Coordonnées, liens et appel à l’action" : "Contact details, links, and call to action"}</span><textarea value={profile.descriptionFooter ?? ""} onChange={event => field("descriptionFooter", event.target.value)} rows={5} placeholder={lang === "fr" ? "Ajoutez ici le texte qui doit apparaître automatiquement dans toutes vos descriptions…" : "Add the text that should automatically appear in all your descriptions…"} /><small>{lang === "fr" ? "Les sauts de ligne, emojis, numéros et liens sont conservés exactement. Laissez ce champ vide pour ne rien ajouter." : "Line breaks, emojis, phone numbers, and links are preserved exactly. Leave this empty to add nothing."}</small></label>
+      <div className="description-footer-actions"><button type="button" onClick={() => field("descriptionFooter", profileDemo.descriptionFooter ?? "")}>{lang === "fr" ? "Restaurer le bloc Envol IA" : "Restore Envol IA block"}</button><span>{lang === "fr" ? "Ce bloc n’est jamais reformulé par l’IA." : "This block is never rewritten by AI."}</span></div>
     </section>
     <section className="form-section"><h2>{lang === "fr" ? "Identité éditoriale" : "Editorial identity"}</h2><div className="form-grid"><Field label={lang === "fr" ? "Nom de la chaîne" : "Channel name"} value={profile.channel} set={v => field("channel", v)} /><Field label={lang === "fr" ? "Thématique" : "Topic"} value={profile.theme} set={v => field("theme", v)} /><Field label={t.primaryLang} value={profile.primary} set={v => field("primary", v)} /><Field label={t.secondaryLang} value={profile.secondary} set={v => field("secondary", v)} /><Field label={t.audience} value={profile.audience} set={v => field("audience", v)} wide textarea /><Field label={t.tone} value={profile.tone} set={v => field("tone", v)} wide textarea /><Field label={t.duration} value={profile.duration} set={v => field("duration", v)} /></div></section>
     <section className="form-section protected"><div className="section-heading"><div><h2>{t.fixedText}</h2><p>{lang === "fr" ? "Le studio les reproduit exactement, sans reformulation." : "The studio reproduces these exactly, without rewriting."}</p></div><span>⌕ {lang === "fr" ? "PROTÉGÉ" : "PROTECTED"}</span></div><Field label={lang === "fr" ? "Texte de présentation" : "Introduction copy"} value={profile.presentation} set={v => field("presentation", v)} wide textarea /><div className="form-grid"><Field label={lang === "fr" ? "Phrase de lancement" : "Launch line"} value={profile.launch} set={v => field("launch", v)} /><Field label={lang === "fr" ? "Phrase de clôture" : "Closing line"} value={profile.closing} set={v => field("closing", v)} /></div></section>

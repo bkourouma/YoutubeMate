@@ -5,7 +5,7 @@ type RequestBody = {
   inputType?: "script" | "description";
   subject?: string;
   source?: string;
-  profile?: { channel?: string; theme?: string; audience?: string; tone?: string; thumbnailSystemPrompt?: string };
+  profile?: { channel?: string; theme?: string; audience?: string; tone?: string; thumbnailSystemPrompt?: string; descriptionFooter?: string };
 };
 
 function parseJsonContent(content: string) {
@@ -35,11 +35,11 @@ export async function POST(request: Request) {
     }],
     "improvedDescription": "complete YouTube description",
     "tags": ["tag"],
-    "quiz": [{"question":"question","answer":"answer supported by the source"}]
+    "quiz": [{"question":"question","options":["answer A","answer B","answer C"],"correctOption":0}]
   }`;
   const instructions = `You are a senior YouTube packaging strategist. Return only valid JSON matching this schema: ${schema}
-Rules: write viewer-facing copy in ${language}; create exactly 3 options with ids A, B, C; each option must contain exactly 3 distinct thumbnail concepts; every image prompt must be in English, composed for a 16:9 YouTube thumbnail, high contrast, clear focal subject, no logo, no watermark, and no text because headline text is added separately; produce 8-15 relevant tags; never invent facts, figures, links, offers or promises not found in the source. ${hasScript ? "Create exactly 5 quiz questions and answers, with every answer strictly supported by the script." : "Return an empty quiz array."}`;
-  const context = `CHANNEL: ${body.profile?.channel ?? ""}\nTHEME: ${body.profile?.theme ?? ""}\nAUDIENCE: ${body.profile?.audience ?? ""}\nTONE: ${body.profile?.tone ?? ""}\nTHUMBNAIL EDITORIAL SYSTEM: ${body.profile?.thumbnailSystemPrompt ?? "Not defined"}\nSUBJECT: ${body.subject ?? ""}\nSOURCE TYPE: ${hasScript ? "script" : "description"}\nSOURCE:\n${source}`;
+Rules: write viewer-facing copy in ${language}; create exactly 3 options with ids A, B, C; each option must contain exactly 3 distinct thumbnail concepts; every image prompt must be in English, composed for a 16:9 YouTube thumbnail, high contrast, clear focal subject, no logo, no watermark, and no text because headline text is added separately; produce 8-15 relevant tags; never invent facts, figures, links, offers or promises not found in the source. ${hasScript ? "Create exactly 5 quiz items. Every item must contain one question, exactly 3 plausible answer options, and correctOption as the zero-based index (0, 1, or 2) of the only correct option. The correct option must be strictly supported by the script. Distractors must be clearly false according to the source but not absurd." : "Return an empty quiz array."} The automatic description footer is managed by the application; do not paraphrase it.`;
+  const context = `CHANNEL: ${body.profile?.channel ?? ""}\nTHEME: ${body.profile?.theme ?? ""}\nAUDIENCE: ${body.profile?.audience ?? ""}\nTONE: ${body.profile?.tone ?? ""}\nTHUMBNAIL EDITORIAL SYSTEM: ${body.profile?.thumbnailSystemPrompt ?? "Not defined"}\nAUTOMATIC DESCRIPTION FOOTER (append exactly, unchanged):\n${body.profile?.descriptionFooter ?? "None"}\nSUBJECT: ${body.subject ?? ""}\nSOURCE TYPE: ${hasScript ? "script" : "description"}\nSOURCE:\n${source}`;
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -62,7 +62,22 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
     if (!response.ok) return Response.json({ error: "openrouter_request_failed", detail: upstream.error?.message ?? "Request failed" }, { status: response.status === 401 ? 401 : 502 });
     const content = upstream.choices?.[0]?.message?.content;
     if (!content) return Response.json({ error: "openrouter_empty_response" }, { status: 502 });
-    const result = parseJsonContent(content);
+    const result = parseJsonContent(content) as {
+      improvedDescription?: string;
+      quiz?: Array<{ question?: string; options?: unknown[]; correctOption?: number }>;
+      [key: string]: unknown;
+    };
+    if (hasScript) {
+      const validQuiz = Array.isArray(result.quiz) && result.quiz.length === 5 && result.quiz.every(item =>
+        typeof item.question === "string" && item.question.trim() &&
+        Array.isArray(item.options) && item.options.length === 3 && item.options.every(option => typeof option === "string" && option.trim()) &&
+        Number.isInteger(item.correctOption) && (item.correctOption ?? -1) >= 0 && (item.correctOption ?? -1) <= 2
+      );
+      if (!validQuiz) return Response.json({ error: "openrouter_invalid_quiz" }, { status: 502 });
+    } else result.quiz = [];
+    const footer = body.profile?.descriptionFooter?.trim();
+    const generatedDescription = typeof result.improvedDescription === "string" ? result.improvedDescription.trim() : "";
+    result.improvedDescription = footer && !generatedDescription.includes(footer) ? `${generatedDescription}\n\n${footer}`.trim() : generatedDescription;
     return Response.json({ result, usage: upstream.usage ?? null });
   } catch (error) {
     return Response.json({ error: "openrouter_invalid_response", detail: error instanceof Error ? error.message : "Invalid response" }, { status: 502 });

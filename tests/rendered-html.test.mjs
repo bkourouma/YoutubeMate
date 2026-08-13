@@ -57,8 +57,14 @@ test("wires real AI packaging, reference analysis, and image generation", async 
   assert.match(studio, /SESSION UNIQUEMENT/);
   assert.match(studio, /ADN visuel des miniatures/);
   assert.match(studio, /Itérer avec l’IA/);
+  assert.match(studio, /Bloc automatique de description/);
+  assert.match(studio, /JPmF6GBrDAEB1ETlq3pWYh/);
+  assert.match(studio, /5 quiz à trois choix/);
   assert.match(modelsRoute, /openrouter\.ai\/api\/v1\/models\?sort=most-popular&supported_parameters=response_format/);
   assert.match(textRoute, /openrouter\.ai\/api\/v1\/chat\/completions/);
+  assert.match(textRoute, /"options":\["answer A","answer B","answer C"\]/);
+  assert.match(textRoute, /correctOption/);
+  assert.match(textRoute, /descriptionFooter/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/generations/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/edits/);
   assert.match(imageRoute, /gpt-image-2/);

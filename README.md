@@ -7,7 +7,10 @@ profil de chaîne sont sauvegardés par utilisateur.
 ## Packaging assisté par IA
 
 - OpenRouter génère les 3 paires titre/description, 9 concepts de miniature,
-  les tags, la description améliorée et les 5 quiz lorsqu'un script est fourni.
+  les tags, la description améliorée et 5 quiz à trois choix lorsqu'un script
+  est fourni.
+- Le profil permet d'enregistrer un bloc de coordonnées, liens ou appel à
+  l'action. Il est ajouté automatiquement, mot pour mot, à chaque description.
 - Le catalogue de modèles OpenRouter et ses prix entrée/sortie sont récupérés
   en direct depuis l'API officielle.
 - OpenAI Images génère les trois miniatures choisies, téléchargeables en PNG
