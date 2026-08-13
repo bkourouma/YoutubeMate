@@ -29,6 +29,14 @@ profil de chaîne sont sauvegardés par utilisateur.
   au stockage du navigateur.
 - Les scores de titre sont relayés depuis vidIQ sans estimation locale.
 
+## Hook et introduction assistés par IA
+
+- À l'étape « Hook & intro », OpenRouter génère réellement le hook et la
+  promesse à partir du sujet, de l'audience et du ton de la chaîne.
+- L'utilisateur peut cibler le hook, la promesse ou les deux, puis donner des
+  orientations libres ou utiliser des suggestions rapides avant de relancer
+  l'IA. Les textes fixes du profil restent inchangés.
+
 ## Développement
 
 Le projet fonctionne sur vinext avec une base Cloudflare D1 pour la persistance.

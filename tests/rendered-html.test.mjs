@@ -41,11 +41,12 @@ test("removes disposable starter assets and keeps product metadata", async () =>
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
 });
 
-test("wires real AI packaging, reference analysis, and image generation", async () => {
-  const [studio, modelsRoute, textRoute, imageRoute, referenceRoute, styleRoute, hosting] = await Promise.all([
+test("wires real AI packaging, hook iteration, reference analysis, and image generation", async () => {
+  const [studio, modelsRoute, textRoute, hookRoute, imageRoute, referenceRoute, styleRoute, hosting] = await Promise.all([
     readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openrouter-models/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/studio-hook/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openai-image/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/reference-thumbnails/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/reference-style/route.ts", import.meta.url), "utf8"),
@@ -62,6 +63,8 @@ test("wires real AI packaging, reference analysis, and image generation", async 
   assert.match(studio, /5 quiz à trois choix/);
   assert.match(studio, /Meilleur packaging en anglais/);
   assert.match(studio, /COMMENTAIRE À ÉPINGLER/);
+  assert.match(studio, /Affiner avec l’IA/);
+  assert.match(studio, /Appliquer mes orientations/);
   assert.match(modelsRoute, /openrouter\.ai\/api\/v1\/models\?sort=most-popular&supported_parameters=response_format/);
   assert.match(textRoute, /openrouter\.ai\/api\/v1\/chat\/completions/);
   assert.match(textRoute, /"options":\["answer A","answer B","answer C"\]/);
@@ -70,6 +73,9 @@ test("wires real AI packaging, reference analysis, and image generation", async 
   assert.match(textRoute, /englishTitle/);
   assert.match(textRoute, /englishDescription/);
   assert.match(textRoute, /pinnedComment/);
+  assert.match(hookRoute, /openrouter\.ai\/api\/v1\/chat\/completions/);
+  assert.match(hookRoute, /CURRENT HOOK/);
+  assert.match(hookRoute, /USER DIRECTION/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/generations/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/edits/);
   assert.match(imageRoute, /gpt-image-2/);
