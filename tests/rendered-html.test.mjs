@@ -37,6 +37,7 @@ test("removes disposable starter assets and keeps product metadata", async () =>
   assert.match(page, /<ScriptStudio \/>/);
   assert.match(layout, /Script Studio — de l’idée à la publication/);
   assert.match(layout, /\/og\.png/);
+  assert.doesNotMatch(layout, /next\/font/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
 });
@@ -76,6 +77,8 @@ test("wires real AI packaging, hook iteration, reference analysis, and image gen
   assert.match(hookRoute, /openrouter\.ai\/api\/v1\/chat\/completions/);
   assert.match(hookRoute, /CURRENT HOOK/);
   assert.match(hookRoute, /USER DIRECTION/);
+  assert.match(hookRoute, /Repair the draft below/);
+  assert.match(hookRoute, /status: 422/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/generations/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/edits/);
   assert.match(imageRoute, /gpt-image-2/);

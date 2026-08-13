@@ -52,36 +52,47 @@ CURRENT PROMISE: ${body.currentPromise ?? ""}
 USER DIRECTION: ${direction || "None"}`;
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        "http-referer": "https://script-studio-youtube.bkourouma.chatgpt.site/",
-        "x-title": "Script Studio",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-        temperature: action === "iterate" ? 0.55 : 0.75,
-        max_tokens: 700,
-        response_format: { type: "json_object" },
-      }),
-    });
-    const upstream = await response.json() as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string }; usage?: unknown };
-    if (!response.ok) return Response.json({ error: "openrouter_request_failed", detail: upstream.error?.message ?? "Request failed" }, { status: response.status === 401 ? 401 : 502 });
-    const content = upstream.choices?.[0]?.message?.content;
-    if (!content) return Response.json({ error: "openrouter_empty_response" }, { status: 502 });
-    const parsed = parseJsonContent(content);
-    if (typeof parsed.hook !== "string" || typeof parsed.promise !== "string") return Response.json({ error: "openrouter_invalid_hook_response" }, { status: 502 });
-    const hook = parsed.hook.trim();
-    const promise = parsed.promise.trim();
-    const hookWords = countWords(hook);
-    const promiseWords = countWords(promise);
-    const hookLengthValid = action === "iterate" && target === "promise" ? true : hookWords >= 25 && hookWords <= 40;
-    const promiseLengthValid = action === "iterate" && target === "hook" ? true : promiseWords >= 15 && promiseWords <= 45;
-    if (!hookLengthValid || !promiseLengthValid) return Response.json({ error: "openrouter_invalid_hook_length" }, { status: 502 });
-    return Response.json({ result: { hook, promise }, usage: upstream.usage ?? null });
+    const callModel = async (messages: Array<{ role: "system" | "user"; content: string }>, temperature: number) => {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+          "http-referer": "https://script-studio-youtube.bkourouma.chatgpt.site/",
+          "x-title": "Script Studio",
+        },
+        body: JSON.stringify({ model, messages, temperature, max_tokens: 700, response_format: { type: "json_object" } }),
+      });
+      const upstream = await response.json() as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string }; usage?: unknown };
+      return { response, upstream, content: upstream.choices?.[0]?.message?.content };
+    };
+    const validResult = (parsed: { hook?: unknown; promise?: unknown } | null) => {
+      if (typeof parsed?.hook !== "string" || typeof parsed.promise !== "string") return false;
+      const hookWords = countWords(parsed.hook);
+      const promiseWords = countWords(parsed.promise);
+      const hookLengthValid = action === "iterate" && target === "promise" ? true : hookWords >= 25 && hookWords <= 40;
+      const promiseLengthValid = action === "iterate" && target === "hook" ? true : promiseWords >= 15 && promiseWords <= 45;
+      return hookLengthValid && promiseLengthValid;
+    };
+    const parseSafely = (content?: string) => {
+      if (!content) return null;
+      try { return parseJsonContent(content); } catch { return null; }
+    };
+
+    let completion = await callModel([{ role: "system", content: system }, { role: "user", content: user }], action === "iterate" ? 0.55 : 0.75);
+    if (!completion.response.ok) return Response.json({ error: "openrouter_request_failed", detail: completion.upstream.error?.message ?? "OpenRouter request failed" }, { status: completion.response.status === 401 ? 401 : 502 });
+    let parsed = parseSafely(completion.content);
+
+    if (!validResult(parsed)) {
+      const draft = completion.content ?? JSON.stringify(parsed ?? {});
+      const repair = `Repair the draft below. Return only JSON with hook and promise. Count words before answering. The hook must contain exactly 25 to 40 words and the promise exactly 15 to 45 words. Preserve the requested language, subject, audience, tone, and factual limits. ${action === "iterate" && target !== "both" ? `The ${target === "hook" ? "promise" : "hook"} was not targeted and must remain exactly unchanged from the CURRENT value in the original request.` : ""}\n\nDRAFT:\n${draft}`;
+      completion = await callModel([{ role: "system", content: system }, { role: "user", content: user }, { role: "user", content: repair }], 0.2);
+      if (!completion.response.ok) return Response.json({ error: "openrouter_repair_failed", detail: completion.upstream.error?.message ?? "OpenRouter repair failed" }, { status: completion.response.status === 401 ? 401 : 502 });
+      parsed = parseSafely(completion.content);
+    }
+
+    if (!validResult(parsed) || typeof parsed?.hook !== "string" || typeof parsed.promise !== "string") return Response.json({ error: "openrouter_invalid_hook_response", detail: "Le modèle n’a pas respecté le format demandé après une seconde tentative." }, { status: 422 });
+    return Response.json({ result: { hook: parsed.hook.trim(), promise: parsed.promise.trim() }, usage: completion.upstream.usage ?? null });
   } catch (error) {
     return Response.json({ error: "openrouter_invalid_response", detail: error instanceof Error ? error.message : "Invalid response" }, { status: 502 });
   }

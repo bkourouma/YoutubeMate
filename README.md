@@ -36,6 +36,9 @@ profil de chaîne sont sauvegardés par utilisateur.
 - L'utilisateur peut cibler le hook, la promesse ou les deux, puis donner des
   orientations libres ou utiliser des suggestions rapides avant de relancer
   l'IA. Les textes fixes du profil restent inchangés.
+- Si un modèle ne respecte pas le format ou la longueur demandés, le studio lui
+  soumet automatiquement une seconde passe de correction avant d'afficher une
+  erreur explicite.
 
 ## Développement
 
