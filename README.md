@@ -4,6 +4,19 @@ Application bilingue de production éditoriale YouTube : recherche et angle,
 hook, corps du script, conclusion, relecture et packaging. Les projets et le
 profil de chaîne sont sauvegardés par utilisateur.
 
+## Packaging assisté par IA
+
+- OpenRouter génère les 3 paires titre/description, 9 concepts de miniature,
+  les tags, la description améliorée et les 5 quiz lorsqu'un script est fourni.
+- Le catalogue de modèles OpenRouter et ses prix entrée/sortie sont récupérés
+  en direct depuis l'API officielle.
+- OpenAI Images génère les trois miniatures choisies, téléchargeables en PNG
+  1280 × 720.
+- Les clés OpenRouter et OpenAI saisies dans le profil restent uniquement dans
+  la mémoire de l'onglet. Elles ne sont jamais ajoutées au workspace, à D1 ou
+  au stockage du navigateur.
+- Les scores de titre sont relayés depuis vidIQ sans estimation locale.
+
 ## Développement
 
 Le projet fonctionne sur vinext avec une base Cloudflare D1 pour la persistance.
@@ -95,7 +108,7 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
+- `npm test`: build the app and verify the rendered workspace and AI routes
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
 ## Learn More
