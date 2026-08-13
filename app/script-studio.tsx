@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 type Lang = "fr" | "en";
-type View = "studio" | "projects" | "profile";
+type View = "studio" | "express" | "projects" | "profile";
 type StepState = "done" | "active" | "todo";
 
 type Profile = {
@@ -16,6 +16,28 @@ type Project = {
   id: string; title: string; subject: string; status: string; updated: string; step: number;
   confirmed: boolean; completed: number[]; hook: string; promise: string; body: string;
   conclusion: string; reviewAccepted: boolean; packageAnswers: { visual: string; timecodes: string; links: string };
+};
+
+type ExpressState = {
+  inputType: "script" | "description";
+  source: string;
+  subject: string;
+  generated: boolean;
+  selected: Record<string, number>;
+  thumbnailsGenerated: boolean;
+  vidiqScores?: Record<string, number>;
+  vidiqStatus?: "idle" | "loading" | "synced" | "error";
+};
+
+const expressDefault: ExpressState = {
+  inputType: "script",
+  source: "",
+  subject: "",
+  generated: false,
+  selected: { A: 0, B: 0, C: 0 },
+  thumbnailsGenerated: false,
+  vidiqScores: {},
+  vidiqStatus: "idle",
 };
 
 const profileDemo: Profile = {
@@ -40,11 +62,11 @@ const demoProjects: Project[] = [
 
 const labels = {
   fr: {
-    projects: "Projets", studio: "Studio", profile: "Profil de chaîne", newVideo: "Nouvelle vidéo", pilot: "Pilote automatique", saved: "Sauvegardé à l’instant", steps: ["Recherche & angle", "Hook & intro", "Corps du script", "Conclusion & CTA", "Relecture finale", "Packaging"],
+    projects: "Projets", studio: "Studio", express: "Packaging express", profile: "Profil de chaîne", newVideo: "Nouvelle vidéo", pilot: "Pilote automatique", saved: "Sauvegardé à l’instant", steps: ["Recherche & angle", "Hook & intro", "Corps du script", "Conclusion & CTA", "Relecture finale", "Packaging"],
     validate: "Valider l’étape", regenerate: "Régénérer", edit: "Modifier", copy: "Copier", words: "mots", seconds: "secondes", guard: "Garde-fous actifs", facts: "Aucune donnée inventée", fixed: "Textes fixes protégés", oral: "Écriture orale", sources: "Sources vérifiées uniquement", project: "Projet", script: "Prompteur", export: "Exporter", allProjects: "Tous les projets", continue: "Continuer", recent: "Projets récents", channelProfile: "Profil de chaîne", integrations: "Intégrations personnelles", connected: "Connecté", disconnected: "Non connecté", test: "Tester la connexion", disconnect: "Déconnecter", saveProfile: "Enregistrer le profil", primaryLang: "Langue principale", secondaryLang: "Langue secondaire", fixedText: "Textes fixes — protégés mot pour mot", audience: "Audience cible", tone: "Ton & style", duration: "Durée cible", close: "Fermer", download: "Télécharger le document", copyScript: "Copier le script", fullScreen: "Plein écran", back: "Retour au studio", status: "Statut", updated: "Dernière modification", noKey: "Recherche manuelle disponible", ready: "Prêt à tourner", mandatoryStop: "Arrêt obligatoire", answerToContinue: "Votre réponse est requise pour continuer.", launch: "Lancer la génération", overview: "Vue d’ensemble", addSubject: "Quel est le sujet exact de la vidéo ?", create: "Créer le projet", cancel: "Annuler"
   },
   en: {
-    projects: "Projects", studio: "Studio", profile: "Channel profile", newVideo: "New video", pilot: "Autopilot", saved: "Saved just now", steps: ["Research & angle", "Hook & intro", "Script body", "Conclusion & CTA", "Final review", "Packaging"],
+    projects: "Projects", studio: "Studio", express: "Express packaging", profile: "Channel profile", newVideo: "New video", pilot: "Autopilot", saved: "Saved just now", steps: ["Research & angle", "Hook & intro", "Script body", "Conclusion & CTA", "Final review", "Packaging"],
     validate: "Approve step", regenerate: "Regenerate", edit: "Edit", copy: "Copy", words: "words", seconds: "seconds", guard: "Guardrails active", facts: "No invented data", fixed: "Fixed copy protected", oral: "Written for speech", sources: "Verified sources only", project: "Project", script: "Teleprompter", export: "Export", allProjects: "All projects", continue: "Continue", recent: "Recent projects", channelProfile: "Channel profile", integrations: "Personal integrations", connected: "Connected", disconnected: "Not connected", test: "Test connection", disconnect: "Disconnect", saveProfile: "Save profile", primaryLang: "Primary language", secondaryLang: "Secondary language", fixedText: "Fixed copy — protected word for word", audience: "Target audience", tone: "Tone & style", duration: "Target duration", close: "Close", download: "Download document", copyScript: "Copy script", fullScreen: "Full screen", back: "Back to studio", status: "Status", updated: "Last updated", noKey: "Manual research available", ready: "Ready to record", mandatoryStop: "Mandatory stop", answerToContinue: "Your answer is required to continue.", launch: "Start generation", overview: "Overview", addSubject: "What is the exact video topic?", create: "Create project", cancel: "Cancel"
   },
 };
@@ -56,6 +78,7 @@ export default function ScriptStudio() {
   const [view, setView] = useState<View>("studio");
   const [profile, setProfile] = useState(profileDemo);
   const [projects, setProjects] = useState(demoProjects);
+  const [express, setExpress] = useState<ExpressState>(expressDefault);
   const [activeId, setActiveId] = useState(demoProjects[0].id);
   const [auto, setAuto] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -73,16 +96,16 @@ export default function ScriptStudio() {
     const localLang = localStorage.getItem("script-studio-lang") as Lang | null;
     if (localLang === "fr" || localLang === "en") setLang(localLang);
     if (local) {
-      try { const parsed = JSON.parse(local); setProfile(parsed.profile ?? profileDemo); setProjects(parsed.projects ?? demoProjects); setActiveId(parsed.activeId ?? demoProjects[0].id); } catch { /* retain demo */ }
+      try { const parsed = JSON.parse(local); setProfile(parsed.profile ?? profileDemo); setProjects(parsed.projects ?? demoProjects); setActiveId(parsed.activeId ?? demoProjects[0].id); setExpress(parsed.express ?? expressDefault); } catch { /* retain demo */ }
     }
-    fetch("/api/workspace").then(r => r.json() as Promise<{ payload?: { profile: Profile; projects: Project[]; activeId: string } }>).then(data => {
-      if (data.payload?.projects?.length) { setProfile(data.payload.profile); setProjects(data.payload.projects); setActiveId(data.payload.activeId); }
+    fetch("/api/workspace").then(r => r.json() as Promise<{ payload?: { profile: Profile; projects: Project[]; activeId: string; express?: ExpressState } }>).then(data => {
+      if (data.payload?.projects?.length) { setProfile(data.payload.profile); setProjects(data.payload.projects); setActiveId(data.payload.activeId); setExpress(data.payload.express ?? expressDefault); }
     }).catch(() => null).finally(() => setHydrated(true));
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    const payload = { profile, projects, activeId };
+    const payload = { profile, projects, activeId, express };
     localStorage.setItem("script-studio-lang", lang);
     localStorage.setItem("script-studio-workspace", JSON.stringify(payload));
     setSaveState("saving");
@@ -90,7 +113,7 @@ export default function ScriptStudio() {
     saveTimer.current = setTimeout(() => {
       fetch("/api/workspace", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null).finally(() => setSaveState("saved"));
     }, 700);
-  }, [profile, projects, activeId, lang, hydrated]);
+  }, [profile, projects, activeId, express, lang, hydrated]);
 
   const updateProject = (patch: Partial<Project>) => setProjects(items => items.map(p => p.id === activeId ? { ...p, ...patch, updated: lang === "fr" ? "À l’instant" : "Just now" } : p));
   const showToast = (message: string) => { setToast(message); setTimeout(() => setToast(""), 1800); };
@@ -140,6 +163,7 @@ export default function ScriptStudio() {
         <button className="new-video" onClick={() => setNewOpen(true)}><span>＋</span>{t.newVideo}</button>
         <nav>
           <NavButton active={view === "studio"} icon="◫" label={t.studio} onClick={() => setView("studio")} />
+          <NavButton active={view === "express"} icon="✦" label={t.express} onClick={() => setView("express")} />
           <NavButton active={view === "projects"} icon="▤" label={t.projects} count={projects.length} onClick={() => setView("projects")} />
           <NavButton active={view === "profile"} icon="◉" label={t.profile} onClick={() => setView("profile")} />
         </nav>
@@ -166,6 +190,7 @@ export default function ScriptStudio() {
           </div>
         </>}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
+        {view === "express" && <ExpressPackaging value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} />}
         {view === "profile" && <ProfilePage profile={profile} setProfile={setProfile} lang={lang} t={t} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
       </main>
       {newOpen && <div className="modal-backdrop" onMouseDown={() => setNewOpen(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><button className="modal-close" onClick={() => setNewOpen(false)}>×</button><span className="eyebrow">{lang === "fr" ? "NOUVEAU PROJET" : "NEW PROJECT"}</span><h2>{t.addSubject}</h2><p>{lang === "fr" ? "Soyez précis : le studio ne recherchera jamais une catégorie plus large." : "Be specific: the studio will never research a broader category."}</p><textarea autoFocus value={newSubject} onChange={e => setNewSubject(e.target.value)} placeholder={lang === "fr" ? "Ex. Comment utiliser l’IA pour répondre aux clients sur WhatsApp Business" : "E.g. How to use AI to answer customers on WhatsApp Business"} /><div className="modal-actions"><button className="ghost" onClick={() => setNewOpen(false)}>{t.cancel}</button><button className="primary" onClick={createProject}>{t.create} →</button></div></div></div>}
@@ -192,6 +217,107 @@ function Position({ tag, title }: { tag: string; title: string }) { return <div>
 function EmptyGenerate({ onClick, t, lang }: { onClick: () => void; t: (typeof labels)[Lang]; lang: Lang }) { return <div className="empty-generate"><span>✦</span><h3>{lang === "fr" ? "Tout est prêt pour cette étape" : "Everything is ready for this step"}</h3><p>{lang === "fr" ? "Le profil et les sorties validées seront utilisés comme contexte." : "Your profile and approved outputs will be used as context."}</p><button className="primary" onClick={onClick}>✦ {t.launch}</button></div>; }
 function OutputBlock({ label, value, onChange, copy, meta, rows = 5 }: { label: string; value: string; onChange: (v: string) => void; copy: () => void; meta?: React.ReactNode; rows?: number }) { return <div className="output-block"><div className="output-label"><span>{label}</span><div>{meta}<button onClick={copy}>⧉ Copier</button></div></div><textarea value={value} onChange={e => onChange(e.target.value)} rows={rows} /></div>; }
 function Review({ status, label, detail }: { status: "ok" | "warn"; label: string; detail?: string }) { return <div className={`review ${status}`}><span>{status === "ok" ? "✓" : "!"}</span><div><strong>{label}</strong>{detail && <small>{detail}</small>}</div></div>; }
+
+function ExpressPackaging({ value, setValue, profile, lang, copy, showToast }: { value: ExpressState; setValue: (value: ExpressState) => void; profile: Profile; lang: Lang; copy: (value: string) => void; showToast: (value: string) => void }) {
+  const [loading, setLoading] = useState(false);
+  const sourceSentences = value.source.split(/(?<=[.!?])\s+/).map(item => item.trim()).filter(Boolean);
+  const sourceTopic = (value.subject.trim() || sourceSentences[0] || (lang === "fr" ? "Votre vidéo" : "Your video")).replace(/[.!?]+$/, "");
+  const topic = sourceTopic.length > 70 ? `${sourceTopic.slice(0, 67)}…` : sourceTopic;
+  const options = [
+    {
+      id: "A", register: lang === "fr" ? "Bascule émotionnelle" : "Emotional shift",
+      title: lang === "fr" ? `Pourquoi ${topic} change tout` : `Why ${topic} changes everything`,
+      description: lang === "fr" ? `Ce que ${topic.toLowerCase()} change concrètement — et le point essentiel à garder sous contrôle.` : `What ${topic.toLowerCase()} changes in practice — and the essential point to keep under control.`,
+      overlay: lang === "fr" ? "ÇA CHANGE TOUT" : "THIS CHANGES EVERYTHING",
+      concepts: [
+        { name: lang === "fr" ? "Le déclic" : "The realization", prompt: `YouTube thumbnail, creator on the left reacting with a sudden realization, one clear visual symbol representing ${topic} on the right, deep forest green background, dramatic warm rim light, strong contrast, generous negative space, no text, no watermark`, art: "portrait" },
+        { name: lang === "fr" ? "Avant / après" : "Before / after", prompt: `YouTube thumbnail, split composition showing a cluttered before state and a calm organized after state inspired by ${topic}, bold visual transformation, warm orange accent, cinematic lighting, no text, no watermark`, art: "split" },
+        { name: lang === "fr" ? "L’objet impossible" : "The impossible object", prompt: `YouTube thumbnail, one oversized everyday object used as a visual metaphor for ${topic}, creator looking at it with curiosity, minimal dark green studio, high contrast editorial lighting, no text, no watermark`, art: "object" },
+      ],
+    },
+    {
+      id: "B", register: lang === "fr" ? "Résultat concret" : "Concrete result",
+      title: lang === "fr" ? `Comment réussir ${topic} sans perdre le contrôle` : `How to master ${topic} without losing control`,
+      description: lang === "fr" ? `Une méthode claire, tirée de la vidéo, pour passer de l’idée à l’action sans ajouter de promesse non vérifiée.` : `A clear method drawn from the video to move from idea to action without adding an unverified promise.`,
+      overlay: lang === "fr" ? "GARDE LE CONTRÔLE" : "STAY IN CONTROL",
+      concepts: [
+        { name: lang === "fr" ? "La méthode en main" : "Method in hand", prompt: `YouTube thumbnail, confident creator holding a simple three-step card related to ${topic}, clean dark green backdrop, warm key light, focused expression, premium editorial composition, no text, no watermark`, art: "cards" },
+        { name: lang === "fr" ? "Le choix décisif" : "The key choice", prompt: `YouTube thumbnail, creator between two large contrasting paths representing a wrong and right approach to ${topic}, decisive gesture toward the clear path, cinematic orange and green lighting, no text, no watermark`, art: "choice" },
+        { name: lang === "fr" ? "Le tableau de bord" : "The dashboard", prompt: `YouTube thumbnail, close-up creator pointing at a clean visual dashboard metaphor for ${topic}, only three bold visual indicators, dark background, crisp studio lighting, no text, no watermark`, art: "dashboard" },
+      ],
+    },
+    {
+      id: "C", register: lang === "fr" ? "Vidéo de référence" : "Reference video",
+      title: lang === "fr" ? `${topic} : le guide clair` : `${topic}: the clear guide`,
+      description: lang === "fr" ? `Les idées, étapes et limites réellement présentées dans la vidéo, réunies dans un guide facile à retrouver.` : `The ideas, steps and limits actually presented in the video, brought together in an easy-to-find guide.`,
+      overlay: lang === "fr" ? "LE GUIDE" : "THE GUIDE",
+      concepts: [
+        { name: lang === "fr" ? "La carte complète" : "The complete map", prompt: `YouTube thumbnail, creator beside a clean visual map of ${topic} with one starting point and three connected milestones, forest green and warm ivory palette, authoritative editorial lighting, no text, no watermark`, art: "map" },
+        { name: lang === "fr" ? "Le sujet isolé" : "The isolated subject", prompt: `YouTube thumbnail, one iconic subject representing ${topic} isolated at large scale in the center, creator small on the side pointing toward it, minimal premium composition, no text, no watermark`, art: "focus" },
+        { name: lang === "fr" ? "La boîte à outils" : "The toolkit", prompt: `YouTube thumbnail, open toolkit containing three symbolic objects derived from ${topic}, creator presenting it with a calm expert expression, warm studio light, deep green background, no text, no watermark`, art: "toolkit" },
+      ],
+    },
+  ];
+  const meaningfulWords = Array.from(new Set(`${topic} ${profile.channel} ${profile.theme}`.toLowerCase().replace(/[^a-zà-ÿ0-9\s-]/gi, "").split(/\s+/).filter(word => word.length > 3))).slice(0, 10);
+  const tags = Array.from(new Set([topic.toLowerCase(), `${topic.toLowerCase()} guide`, `${topic.toLowerCase()} tutoriel`, profile.channel.toLowerCase(), ...meaningfulWords, lang === "fr" ? "vidéo explicative" : "explainer video", lang === "fr" ? "guide pratique" : "practical guide"])).slice(0, 15);
+  const improvedDescription = lang === "fr"
+    ? `${topic} : cette vidéo présente une méthode claire à partir du contenu réellement expliqué.\n\nCE QUE TU VAS VOIR\n• L’idée centrale de la vidéo\n• La méthode ou le raisonnement présenté\n• Un point concret à retenir\n• Les limites et nuances mentionnées\n\nÀ NOTER\nCette description n’ajoute aucun chiffre, tarif, lien ou promesse absent du contenu fourni.\n\n${profile.offer}\n\n${profile.contacts}\n\nAbonne-toi pour recevoir les prochaines vidéos de ${profile.channel}.`
+    : `${topic}: this video presents a clear method using only what was actually explained.\n\nWHAT YOU WILL SEE\n• The video’s central idea\n• The method or reasoning presented\n• One concrete takeaway\n• The limits and nuances mentioned\n\nPLEASE NOTE\nThis description adds no figure, price, link or promise absent from the supplied content.\n\n${profile.offer}\n\n${profile.contacts}\n\nSubscribe for the next videos from ${profile.channel}.`;
+  const quizPrompts = lang === "fr"
+    ? ["Quelle est l’idée centrale présentée dans la vidéo ?", "Quel problème ou besoin est expliqué ?", "Quelle méthode ou solution est proposée ?", "Quel exemple ou argument faut-il retenir ?", "Quelle limite ou nuance est mentionnée ?"]
+    : ["What is the central idea presented in the video?", "What problem or need is explained?", "What method or solution is proposed?", "What example or argument should viewers remember?", "What limit or nuance is mentioned?"];
+  const quiz = quizPrompts.map((question, index) => ({ question, answer: sourceSentences[index] || sourceSentences[0] || value.source }));
+  const update = (patch: Partial<ExpressState>) => setValue({ ...value, ...patch });
+  const generate = () => {
+    if (value.source.trim().length < 80) return showToast(lang === "fr" ? "Ajoutez au moins 80 caractères de contenu." : "Add at least 80 characters of content.");
+    if (!profile.vidiqConnected) return showToast(lang === "fr" ? "Connectez d’abord votre compte vidIQ dans le Profil de chaîne." : "Connect your vidIQ account in Channel profile first.");
+    setLoading(true);
+    setTimeout(() => { update({ generated: true, thumbnailsGenerated: false, vidiqScores: {}, vidiqStatus: "idle" }); setLoading(false); }, 650);
+  };
+  const syncVidiqScores = async () => {
+    update({ vidiqStatus: "loading" });
+    try {
+      const response = await fetch("/api/vidiq-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ titles: options.map(option => ({ id: option.id, title: option.title })) }) });
+      const data = await response.json() as { scores?: Record<string, number>; error?: string };
+      if (!response.ok || !data.scores) throw new Error(data.error || "vidiq_unavailable");
+      update({ vidiqScores: data.scores, vidiqStatus: "synced" });
+      showToast(lang === "fr" ? "Scores vidIQ synchronisés" : "vidIQ scores synced");
+    } catch {
+      update({ vidiqStatus: "error" });
+      showToast(lang === "fr" ? "Connexion vidIQ indisponible. Aucun score n’a été estimé." : "vidIQ connection unavailable. No score was estimated.");
+    }
+  };
+  const generateThumbnails = () => {
+    setLoading(true);
+    setTimeout(() => { update({ thumbnailsGenerated: true }); setLoading(false); }, 850);
+  };
+  const downloadThumbnail = (option: typeof options[number], conceptIndex: number) => {
+    const canvas = document.createElement("canvas"); canvas.width = 1280; canvas.height = 720;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    const palettes = [["#10251d", "#d95d2b"], ["#17221f", "#e2a565"], ["#0f2d23", "#d9efe2"]];
+    const [background, accent] = palettes[conceptIndex];
+    ctx.fillStyle = background; ctx.fillRect(0, 0, 1280, 720);
+    ctx.fillStyle = accent; ctx.fillRect(0, 0, 24, 720);
+    ctx.globalAlpha = .14; ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(960, 350, 265, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1; ctx.fillStyle = "#f7f8f5"; ctx.beginPath(); ctx.arc(960, 278, 105, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(820, 395, 280, 210);
+    ctx.fillStyle = accent; ctx.fillRect(760, 570, 400, 18);
+    ctx.fillStyle = "#f7f8f5"; ctx.font = "900 34px Arial"; ctx.fillText(profile.channel.toUpperCase(), 86, 105);
+    ctx.font = "900 68px Arial"; wrapCanvasText(ctx, option.overlay, 86, 310, 600, 78);
+    ctx.fillStyle = accent; ctx.font = "700 28px Arial"; ctx.fillText(option.concepts[conceptIndex].name.toUpperCase(), 88, 585);
+    ctx.fillStyle = "#f7f8f5"; ctx.font = "500 21px Arial"; wrapCanvasText(ctx, topic, 88, 635, 620, 28);
+    const link = document.createElement("a"); link.download = `miniature-${option.id.toLowerCase()}-${conceptIndex + 1}.png`; link.href = canvas.toDataURL("image/png"); link.click();
+  };
+
+  if (!value.generated) return <div className="express-page"><div className="express-hero"><div><span className="eyebrow">{lang === "fr" ? "VIDÉO DÉJÀ TOURNÉE" : "VIDEO ALREADY RECORDED"}</span><h1>{lang === "fr" ? "Du contenu au clic." : "From content to click."}</h1><p>{lang === "fr" ? "Collez votre script ou votre description. Script Studio prépare le test A/B, les concepts de miniature et les quiz — sans réécrire la vidéo." : "Paste your script or description. Script Studio prepares the A/B test, thumbnail concepts and quizzes — without rewriting the video."}</p></div><div className="express-orbit"><span>3×3</span><small>{lang === "fr" ? "titres × concepts" : "titles × concepts"}</small></div></div><section className="express-input-card"><div className={`vidiq-requirement ${profile.vidiqConnected ? "connected" : ""}`}><span>{profile.vidiqConnected ? "✓" : "!"}</span><div><strong>{profile.vidiqConnected ? (lang === "fr" ? "Compte vidIQ connecté" : "vidIQ account connected") : (lang === "fr" ? "Connexion vidIQ requise" : "vidIQ connection required")}</strong><small>{lang === "fr" ? "Les scores de titres seront repris tels quels depuis vidIQ — jamais estimés." : "Title scores will be reported exactly as returned by vidIQ — never estimated."}</small></div></div><div className="source-toggle"><button className={value.inputType === "script" ? "active" : ""} onClick={() => update({ inputType: "script", generated: false })}>▤ {lang === "fr" ? "J’ai le script" : "I have the script"}<small>{lang === "fr" ? "Inclut 5 quiz" : "Includes 5 quizzes"}</small></button><button className={value.inputType === "description" ? "active" : ""} onClick={() => update({ inputType: "description", generated: false })}>≡ {lang === "fr" ? "J’ai la description" : "I have the description"}<small>{lang === "fr" ? "Packaging uniquement" : "Packaging only"}</small></button></div><label><span>{lang === "fr" ? "Sujet de la vidéo (facultatif)" : "Video topic (optional)"}</span><input value={value.subject} onChange={event => update({ subject: event.target.value, generated: false })} placeholder={lang === "fr" ? "Le système le déduira du contenu si ce champ est vide" : "The system will infer it from the content if left blank"} /></label><label><span>{value.inputType === "script" ? (lang === "fr" ? "Script complet" : "Full script") : (lang === "fr" ? "Description existante" : "Existing description")}</span><textarea value={value.source} onChange={event => update({ source: event.target.value, generated: false })} rows={13} placeholder={lang === "fr" ? "Collez ici le contenu exact de la vidéo…" : "Paste the exact video content here…"} /></label><div className="input-footer"><span>◆ {lang === "fr" ? "Seules les informations collées seront utilisées" : "Only pasted information will be used"}</span><button className="primary express-generate" onClick={generate} disabled={loading || !profile.vidiqConnected}>{loading ? (lang === "fr" ? "Analyse…" : "Analyzing…") : (lang === "fr" ? "Générer le packaging" : "Generate packaging")} →</button></div></section></div>;
+
+  return <div className="express-page results"><div className="express-result-head"><div><button onClick={() => update({ generated: false, thumbnailsGenerated: false })}>← {lang === "fr" ? "Modifier la source" : "Edit source"}</button><span className="eyebrow">{lang === "fr" ? "PACKAGING EXPRESS" : "EXPRESS PACKAGING"}</span><h1>{topic}</h1></div><div className="result-status"><span>✓</span><div><strong>{lang === "fr" ? "Analyse terminée" : "Analysis complete"}</strong><small>{value.inputType === "script" ? (lang === "fr" ? "Script + quiz" : "Script + quiz") : (lang === "fr" ? "Description seule" : "Description only")}</small></div></div></div><section className="express-section"><div className="express-section-title"><span>01</span><div><h2>{lang === "fr" ? "Tests A/B/C" : "A/B/C tests"}</h2><p>{lang === "fr" ? "Choisissez un concept visuel pour chaque paire titre–description." : "Choose one visual concept for each title–description pair."}</p></div><button className={`vidiq-sync ${value.vidiqStatus || "idle"}`} onClick={syncVidiqScores} disabled={value.vidiqStatus === "loading"}>{value.vidiqStatus === "loading" ? (lang === "fr" ? "Synchronisation…" : "Syncing…") : (lang === "fr" ? "Synchroniser les scores vidIQ" : "Sync vidIQ scores")}</button></div><div className="ab-options">{options.map(option => <article className="ab-option" key={option.id}><div className="ab-option-head"><span>OPTION {option.id}</span><small>{option.register}</small></div><div className={`vidiq-score ${value.vidiqScores?.[option.id] !== undefined ? "ready" : "pending"}`}><b>{value.vidiqScores?.[option.id] ?? "—"}</b><span>{value.vidiqScores?.[option.id] !== undefined ? "/100 · vidIQ" : (lang === "fr" ? "score vidIQ en attente" : "vidIQ score pending")}</span></div><h3>{option.title}</h3><p>{option.description}</p><div className="copy-row"><button onClick={() => copy(option.title)}>⧉ {lang === "fr" ? "Titre" : "Title"}</button><button onClick={() => copy(option.description)}>⧉ Description</button></div><div className="concept-list"><strong>{lang === "fr" ? "3 concepts de miniature" : "3 thumbnail concepts"}</strong>{option.concepts.map((concept, index) => <button className={value.selected[option.id] === index ? "selected" : ""} key={concept.name} onClick={() => update({ selected: { ...value.selected, [option.id]: index }, thumbnailsGenerated: false })}><span>{value.selected[option.id] === index ? "✓" : index + 1}</span><div><b>{concept.name}</b><small>{concept.prompt}</small></div></button>)}</div></article>)}</div><div className="vidiq-truth-note">◆ {value.vidiqStatus === "error" ? (lang === "fr" ? "vidIQ n’a renvoyé aucun score. Aucun score de remplacement n’est affiché." : "vidIQ returned no score. No replacement score is displayed.") : (lang === "fr" ? "Les valeurs vidIQ sont affichées telles quelles, sans arrondi ni estimation locale." : "vidIQ values are shown exactly as returned, with no rounding or local estimate.")}</div><button className="primary thumbnail-cta" onClick={generateThumbnails} disabled={loading}>✦ {loading ? (lang === "fr" ? "Génération…" : "Generating…") : (lang === "fr" ? "Générer les 3 miniatures choisies" : "Generate the 3 selected thumbnails")}</button></section>{value.thumbnailsGenerated && <section className="express-section generated-thumbnails"><div className="express-section-title"><span>02</span><div><h2>{lang === "fr" ? "Miniatures générées" : "Generated thumbnails"}</h2><p>{lang === "fr" ? "Téléchargez les fichiers PNG au format YouTube 1280 × 720." : "Download PNG files in YouTube’s 1280 × 720 format."}</p></div></div><div className="thumbnail-grid">{options.map(option => { const conceptIndex = value.selected[option.id] ?? 0; return <div key={option.id} className={`thumbnail-preview art-${option.concepts[conceptIndex].art}`}><div className="thumb-brand">{profile.channel}</div><div className="thumb-copy"><strong>{option.overlay}</strong><small>{option.concepts[conceptIndex].name}</small></div><div className="thumb-person"><i /><span /></div><button onClick={() => downloadThumbnail(option, conceptIndex)}>↓ PNG · 1280 × 720</button></div>; })}</div></section>}<section className="express-section"><div className="express-section-title"><span>{value.thumbnailsGenerated ? "03" : "02"}</span><div><h2>{lang === "fr" ? "Description améliorée & tags" : "Improved description & tags"}</h2><p>{lang === "fr" ? "Prêts à copier dans YouTube Studio." : "Ready to paste into YouTube Studio."}</p></div></div><div className="delivery-grid"><div className="delivery-card"><div><strong>{lang === "fr" ? "DESCRIPTION AMÉLIORÉE" : "IMPROVED DESCRIPTION"}</strong><button onClick={() => copy(improvedDescription)}>⧉ {lang === "fr" ? "Copier" : "Copy"}</button></div><pre>{improvedDescription}</pre></div><div className="delivery-card tags-card"><div><strong>TAGS</strong><button onClick={() => copy(tags.join(", "))}>⧉ {lang === "fr" ? "Copier tout" : "Copy all"}</button></div><div>{tags.map(tag => <span key={tag}>{tag}</span>)}</div></div></div></section>{value.inputType === "script" && <section className="express-section"><div className="express-section-title"><span>{value.thumbnailsGenerated ? "04" : "03"}</span><div><h2>{lang === "fr" ? "5 questions / réponses Quiz" : "5 quiz questions / answers"}</h2><p>{lang === "fr" ? "Les réponses reprennent uniquement des passages du script fourni." : "Answers only reuse passages from the supplied script."}</p></div></div><div className="quiz-list">{quiz.map((item, index) => <article key={item.question}><span>{index + 1}</span><div><strong>{item.question}</strong><p>{item.answer}</p></div><button onClick={() => copy(`${item.question}\n${item.answer}`)}>⧉</button></article>)}</div></section>}</div>;
+}
+
+function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number) {
+  const words = text.split(" "); let line = ""; let currentY = y;
+  for (const word of words) { const test = `${line}${word} `; if (ctx.measureText(test).width > maxWidth && line) { ctx.fillText(line.trim(), x, currentY); line = `${word} `; currentY += lineHeight; } else line = test; }
+  if (line) ctx.fillText(line.trim(), x, currentY);
+}
 
 function Packaging({ project, updateProject, lang, t, copy }: { project: Project; updateProject: (p: Partial<Project>) => void; lang: Lang; t: (typeof labels)[Lang]; copy: (v: string) => void }) {
   const a = project.packageAnswers; const setAnswer = (key: keyof typeof a, value: string) => updateProject({ packageAnswers: { ...a, [key]: value } });

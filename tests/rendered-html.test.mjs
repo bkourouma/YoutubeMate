@@ -22,6 +22,7 @@ test("server-renders the Script Studio workspace", async () => {
   assert.match(html, /Hook &amp; intro/);
   assert.match(html, /Recherche &amp; angle/);
   assert.match(html, /Packaging/);
+  assert.match(html, /Packaging express/);
   assert.match(html, /Garde-fous actifs/);
   assert.match(html, /28<!-- --> \/ 40/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
