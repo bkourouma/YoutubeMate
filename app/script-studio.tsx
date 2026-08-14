@@ -2,9 +2,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ShortsStudio } from "./shorts-studio";
 
 type Lang = "fr" | "en";
-type View = "studio" | "express" | "projects" | "profile";
+type View = "studio" | "shorts" | "express" | "projects" | "profile";
 type StepState = "done" | "active" | "todo";
 type HookIterationTarget = "hook" | "promise" | "both";
 type NoticeKind = "warning" | "error";
@@ -708,7 +709,7 @@ export default function ScriptStudio() {
         <nav>
           <NavButton active={view === "studio"} icon="◫" label={t.studio} onClick={() => setView("studio")} />
           <NavButton active={view === "express"} icon="✦" label={t.express} onClick={() => setView("express")} />
-          <NavButton active={false} icon="▶" label={t.shorts} soon={t.soon} onClick={() => showToast(lang === "fr" ? "Shorts Studio arrive : la production de shorts est en cours d’intégration." : "Shorts Studio is coming: the shorts pipeline is being integrated.", "warning")} />
+          <NavButton active={view === "shorts"} icon="▶" label={t.shorts} onClick={() => setView("shorts")} />
           <NavButton active={view === "projects"} icon="▤" label={t.projects} count={projects.length} onClick={() => setView("projects")} />
           <NavButton active={view === "profile"} icon="◉" label={t.profile} onClick={() => setView("profile")} />
         </nav>
@@ -739,6 +740,7 @@ export default function ScriptStudio() {
             <aside className="guard-panel"><div className="guard-title"><span>◆</span><div><strong>{t.guard}</strong><small>{lang === "fr" ? "Pour cette génération" : "For this generation"}</small></div></div><Guard label={t.facts} /><Guard label={t.fixed} /><Guard label={t.oral} /><Guard label={t.sources} /><hr /><div className="context-box"><small>{lang === "fr" ? "CONTEXTE ACTIF" : "ACTIVE CONTEXT"}</small><strong>{profile.channel}</strong><p>{profile.audience}</p><button onClick={() => setView("profile")}>{lang === "fr" ? "Voir le profil" : "View profile"} →</button></div></aside>
           </div>
         </>}
+        {view === "shorts" && <ShortsStudio lang={lang} openrouterReady={integrations.openrouter.configured} writerModel={aiSettings.writerModel} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
         {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} />}
         {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}

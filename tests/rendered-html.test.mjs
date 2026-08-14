@@ -491,15 +491,54 @@ test("ports the Shorts data routes with identity, caps and its cue logic intact"
   assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
 });
 
+test("renders the Shorts pipeline inside the shared shell", async () => {
+  const [shorts, studio] = await Promise.all([
+    readFile(new URL("../app/shorts-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+  ]);
+  // The wrapper class is what keeps the two stylesheets apart.
+  assert.match(shorts, /className="pipeline-shorts"/);
+  // Shorts must reuse the shell's identity, alerts and retry helper, not its own copies.
+  assert.match(studio, /<ShortsStudio lang=\{lang\}/);
+  assert.match(studio, /postJson=\{postJsonWithRetry\}/);
+  assert.doesNotMatch(shorts, /apiKey/);
+  assert.doesNotMatch(shorts, /localStorage/);
+  // The four ported endpoints, and none of the not-yet-ported ones.
+  assert.match(shorts, /\/api\/shorts-analyze/);
+  assert.match(shorts, /\/api\/shorts-titles/);
+  assert.match(shorts, /\/api\/shorts-metadata/);
+  assert.match(shorts, /\/api\/shorts-projects/);
+  assert.doesNotMatch(shorts, /\/api\/descript|\/api\/youtube/);
+  // A title change must invalidate the metadata written for the previous one.
+  assert.match(shorts, /const chooseTitle = /);
+  assert.match(shorts, /delete next\[index\]/);
+  // An SRT starts with a cue number: naming a project after line 1 would call it "1".
+  assert.match(shorts, /!\/\^\\d\+\$\/\.test\(line\)/);
+});
+
 test("keeps Shorts styles scoped so the two pipelines can never collide", async () => {
   const shorts = await readFile(new URL("../app/shorts.css", import.meta.url), "utf8");
   const withoutComments = shorts.replace(/\/\*[\s\S]*?\*\//g, "");
   // Selectors only: drop declaration blocks, at-rule preludes and stray braces.
+  // Commas inside :where()/:is() belong to one selector, so only split at depth 0.
+  const splitTopLevel = prelude => {
+    const parts = [];
+    let depth = 0;
+    let current = "";
+    for (const character of prelude) {
+      if (character === "(") depth += 1;
+      if (character === ")") depth -= 1;
+      if (character === "," && depth === 0) { parts.push(current); current = ""; continue; }
+      current += character;
+    }
+    parts.push(current);
+    return parts.map(part => part.trim()).filter(Boolean);
+  };
   const selectors = withoutComments
     .split("}")
     .map(block => block.split("{")[0].trim())
     .filter(Boolean)
-    .flatMap(prelude => prelude.split(",").map(part => part.trim()).filter(Boolean))
+    .flatMap(splitTopLevel)
     .filter(selector => !selector.startsWith("@"));
   for (const selector of selectors) {
     assert.ok(
