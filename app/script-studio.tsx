@@ -115,11 +115,11 @@ const demoProjects: Project[] = [
 
 const labels = {
   fr: {
-    projects: "Projets", studio: "Studio", express: "Packaging express", profile: "Profil de chaîne", newVideo: "Nouvelle vidéo", pilot: "Pilote automatique", saved: "Sauvegardé à l’instant", steps: ["Recherche & angle", "Hook & intro", "Validation des chapitres", "Corps du script", "Conclusion & CTA", "Relecture finale", "Packaging"],
+    projects: "Projets", studio: "Script Studio", shorts: "Shorts Studio", soon: "bientôt", express: "Packaging express", profile: "Profil & paramètres", newVideo: "Nouvelle vidéo", pilot: "Pilote automatique", saved: "Sauvegardé à l’instant", steps: ["Recherche & angle", "Hook & intro", "Validation des chapitres", "Corps du script", "Conclusion & CTA", "Relecture finale", "Packaging"],
     validate: "Valider l’étape", regenerate: "Régénérer", edit: "Modifier", copy: "Copier", words: "mots", seconds: "secondes", guard: "Garde-fous actifs", facts: "Aucune donnée inventée", fixed: "Textes fixes protégés", oral: "Écriture orale", sources: "Sources vérifiées uniquement", project: "Projet", script: "Prompteur", export: "Exporter", allProjects: "Tous les projets", continue: "Continuer", recent: "Projets récents", channelProfile: "Profil de chaîne", integrations: "Intégrations personnelles", connected: "Connecté", disconnected: "Non connecté", test: "Tester la connexion", disconnect: "Déconnecter", saveProfile: "Enregistrer le profil", primaryLang: "Langue principale", secondaryLang: "Langue secondaire", fixedText: "Textes fixes — protégés mot pour mot", audience: "Audience cible", tone: "Ton & style", duration: "Durée cible", close: "Fermer", download: "Télécharger le document", copyScript: "Copier le script", fullScreen: "Plein écran", back: "Retour au studio", status: "Statut", updated: "Dernière modification", noKey: "Recherche manuelle disponible", ready: "Prêt à tourner", mandatoryStop: "Arrêt obligatoire", answerToContinue: "Votre réponse est requise pour continuer.", launch: "Lancer la génération", overview: "Vue d’ensemble", addSubject: "Quel est le sujet exact de la vidéo ?", create: "Créer le projet", cancel: "Annuler"
   },
   en: {
-    projects: "Projects", studio: "Studio", express: "Express packaging", profile: "Channel profile", newVideo: "New video", pilot: "Autopilot", saved: "Saved just now", steps: ["Research & angle", "Hook & intro", "Chapter validation", "Script body", "Conclusion & CTA", "Final review", "Packaging"],
+    projects: "Projects", studio: "Script Studio", shorts: "Shorts Studio", soon: "soon", express: "Express packaging", profile: "Profile & settings", newVideo: "New video", pilot: "Autopilot", saved: "Saved just now", steps: ["Research & angle", "Hook & intro", "Chapter validation", "Script body", "Conclusion & CTA", "Final review", "Packaging"],
     validate: "Approve step", regenerate: "Regenerate", edit: "Edit", copy: "Copy", words: "words", seconds: "seconds", guard: "Guardrails active", facts: "No invented data", fixed: "Fixed copy protected", oral: "Written for speech", sources: "Verified sources only", project: "Project", script: "Teleprompter", export: "Export", allProjects: "All projects", continue: "Continue", recent: "Recent projects", channelProfile: "Channel profile", integrations: "Personal integrations", connected: "Connected", disconnected: "Not connected", test: "Test connection", disconnect: "Disconnect", saveProfile: "Save profile", primaryLang: "Primary language", secondaryLang: "Secondary language", fixedText: "Fixed copy — protected word for word", audience: "Target audience", tone: "Tone & style", duration: "Target duration", close: "Close", download: "Download document", copyScript: "Copy script", fullScreen: "Full screen", back: "Back to studio", status: "Status", updated: "Last updated", noKey: "Manual research available", ready: "Ready to record", mandatoryStop: "Mandatory stop", answerToContinue: "Your answer is required to continue.", launch: "Start generation", overview: "Overview", addSubject: "What is the exact video topic?", create: "Create project", cancel: "Cancel"
   },
 };
@@ -693,7 +693,7 @@ export default function ScriptStudio() {
   };
 
   const download = () => {
-    const content = `# ${project.title}\n\n## Idée & angle\n${project.subject}\n\n## Script continu\n${script}\n\n## Verdict\nTextes fixes : conforme · Faits non vérifiés : aucun ajouté\n\n## Packaging\nVoir les options A/B/C dans Script Studio.`;
+    const content = `# ${project.title}\n\n## Idée & angle\n${project.subject}\n\n## Script continu\n${script}\n\n## Verdict\nTextes fixes : conforme · Faits non vérifiés : aucun ajouté\n\n## Packaging\nVoir les options A/B/C dans YoutubeMate.`;
     const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
     const a = document.createElement("a"); a.href = url; a.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.md`; a.click(); URL.revokeObjectURL(url);
   };
@@ -703,11 +703,12 @@ export default function ScriptStudio() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand" onClick={() => setView("studio")} aria-label="Script Studio"><span className="brand-mark">S</span><span>Script Studio<small>Creator workspace</small></span></button>
+        <button className="brand" onClick={() => setView("studio")} aria-label="YoutubeMate"><span className="brand-mark">Y</span><span>YoutubeMate<small>Creator workspace</small></span></button>
         <button className="new-video" onClick={() => setNewOpen(true)}><span>＋</span>{t.newVideo}</button>
         <nav>
           <NavButton active={view === "studio"} icon="◫" label={t.studio} onClick={() => setView("studio")} />
           <NavButton active={view === "express"} icon="✦" label={t.express} onClick={() => setView("express")} />
+          <NavButton active={false} icon="▶" label={t.shorts} soon={t.soon} onClick={() => showToast(lang === "fr" ? "Shorts Studio arrive : la production de shorts est en cours d’intégration." : "Shorts Studio is coming: the shorts pipeline is being integrated.", "warning")} />
           <NavButton active={view === "projects"} icon="▤" label={t.projects} count={projects.length} onClick={() => setView("projects")} />
           <NavButton active={view === "profile"} icon="◉" label={t.profile} onClick={() => setView("profile")} />
         </nav>
@@ -756,7 +757,7 @@ export default function ScriptStudio() {
   );
 }
 
-function NavButton({ active, icon, label, count, onClick }: { active: boolean; icon: string; label: string; count?: number; onClick: () => void }) { return <button className={active ? "active" : ""} onClick={onClick}><span>{icon}</span>{label}{count !== undefined && <i>{count}</i>}</button>; }
+function NavButton({ active, icon, label, count, soon, onClick }: { active: boolean; icon: string; label: string; count?: number; soon?: string; onClick: () => void }) { return <button className={`${active ? "active" : ""}${soon ? " upcoming" : ""}`} onClick={onClick}><span>{icon}</span>{label}{soon && <em>{soon}</em>}{count !== undefined && <i>{count}</i>}</button>; }
 function Guard({ label }: { label: string }) { return <div className="guard-item"><span>✓</span>{label}</div>; }
 
 function Stage({ project, profile, t, lang, updateProject, generate, copy, showToast, aiLoading, bodyProgress, integrations, aiModel, writerModel, iterateHook, aiSettings, referenceThumbnails, openAiSettings, script }: { project: Project; profile: Profile; t: (typeof labels)[Lang]; lang: Lang; updateProject: (p: Partial<Project>) => void; generate: () => void; copy: (v: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiLoading: boolean; integrations: Integrations; bodyProgress: { current: number; total: number; title: string; retrying: boolean } | null; aiModel: string; writerModel: string; iterateHook: (target: HookIterationTarget, direction: string) => Promise<boolean>; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void; script: string }) {

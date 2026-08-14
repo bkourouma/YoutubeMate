@@ -261,4 +261,7 @@ button { cursor:pointer; }
 .credential-status-row button.danger { border-color:#e0aaa2; color:#8d2f2f; }
 .credential-status-row button.danger:hover { background:#fff3f1; }
 @media (max-width:650px) { .legacy-keys-banner { grid-template-columns:24px minmax(0,1fr); }.legacy-keys-banner button { grid-column:2; justify-self:start; } }
+.sidebar nav button.upcoming { opacity:.62; }
+.sidebar nav button.upcoming:hover { opacity:.85; }
+.sidebar nav button.upcoming em { margin-left:6px; padding:2px 6px; border-radius:20px; background:#ffffff1f; color:#c7d6cd; font-style:normal; font-size:7px; font-weight:750; letter-spacing:.4px; text-transform:uppercase; }
 @media (max-width:650px) { .chapter-plan-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }.chapter-toolbar { align-items:flex-start; }.chapter-card { grid-template-columns:40px minmax(0,1fr); padding:9px; }.chapter-index span { width:32px; height:32px; }.chapter-actions { grid-column:2; flex-direction:row; }.body-target { grid-template-columns:1fr; }.body-target > span { grid-column:1; } }

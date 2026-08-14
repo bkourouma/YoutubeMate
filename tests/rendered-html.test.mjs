@@ -22,12 +22,14 @@ async function render() {
   );
 }
 
-test("server-renders the Script Studio workspace", async () => {
+test("server-renders the YoutubeMate workspace with both pipelines named", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /aria-label="Script Studio"/i);
+  assert.match(html, /aria-label="YoutubeMate"/i);
+  assert.match(html, /Script Studio/);
+  assert.match(html, /Shorts Studio/);
   assert.match(html, /Hook &amp; intro/);
   assert.match(html, /Recherche &amp; angle/);
   assert.match(html, /Validation des chapitres/);
@@ -45,7 +47,7 @@ test("removes disposable starter assets and keeps product metadata", async () =>
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /<ScriptStudio \/>/);
-  assert.match(layout, /Script Studio — de l’idée à la publication/);
+  assert.match(layout, /YoutubeMate — de l’idée à la publication/);
   assert.match(layout, /\/og\.png/);
   assert.doesNotMatch(layout, /next\/font/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
@@ -455,6 +457,30 @@ test("reports a provider-output failure instead of mislabelling it as HTTP 422",
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("keeps Shorts styles scoped so the two pipelines can never collide", async () => {
+  const shorts = await readFile(new URL("../app/shorts.css", import.meta.url), "utf8");
+  const withoutComments = shorts.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Selectors only: drop declaration blocks, at-rule preludes and stray braces.
+  const selectors = withoutComments
+    .split("}")
+    .map(block => block.split("{")[0].trim())
+    .filter(Boolean)
+    .flatMap(prelude => prelude.split(",").map(part => part.trim()).filter(Boolean))
+    .filter(selector => !selector.startsWith("@"));
+  for (const selector of selectors) {
+    assert.ok(
+      selector.startsWith(".pipeline-shorts"),
+      `app/shorts.css must scope every selector under .pipeline-shorts, found: ${selector}`,
+    );
+  }
+  // Redefining a shared token here would repaint the shell that both pipelines use.
+  for (const shared of ["--ink:", "--muted:", "--line:", "--bg:", "--green:", "--orange:", "--nav:"]) {
+    assert.doesNotMatch(withoutComments, new RegExp(shared.replace("--", "--")), `app/shorts.css must not redefine the shared token ${shared}`);
+  }
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  assert.match(layout, /import "\.\/shorts\.css"/);
 });
 
 test("never accepts a client-supplied API key and never invents an identity", async () => {

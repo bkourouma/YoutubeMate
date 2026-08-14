@@ -1,0 +1,29 @@
+/*
+ * Shorts Studio styles.
+ *
+ * RULE, enforced by tests/rendered-html.test.mjs: every selector in this file must be
+ * scoped under `.pipeline-shorts`. The two pipelines share 17 class names
+ * (app-shell, topbar, brand, alert, active, selected, done, current, success,
+ * connected, eyebrow, express-hero, express-input-card, publish-section,
+ * section-heading, brand-mark, vidiq-score), so an unscoped rule here would silently
+ * restyle Script Studio. Scoping makes the collision impossible rather than merely
+ * unlikely, without renaming a single className in either component.
+ *
+ * Use `.pipeline-shorts :where(.selected)` for state modifiers so their specificity
+ * stays where the original author expected it.
+ */
+
+/* Shorts-only palette. Custom properties inherit, so these stay inside the pipeline.
+ * The shared tokens (--ink, --muted, --line, --bg) are deliberately NOT redefined:
+ * the shell, alerts, modals and settings must look identical across both pipelines. */
+.pipeline-shorts {
+  --accent: #6557e8;
+  --accent-dark: #4c3fd2;
+  --lime: #dcff67;
+  --coral: #ff7858;
+  --youtube: #e82c31;
+  --surface: #ffffff;
+  --surface-soft: #f8faf6;
+  --line-strong: #c5cec6;
+  --ink-soft: #314039;
+}
