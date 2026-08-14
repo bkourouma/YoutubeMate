@@ -84,7 +84,11 @@ test("wires real AI packaging, key validation, hook iteration, reference analysi
   assert.match(hookRoute, /CURRENT HOOK/);
   assert.match(hookRoute, /USER DIRECTION/);
   assert.match(hookRoute, /Repair the draft below/);
-  assert.match(hookRoute, /status: 422/);
+  assert.match(hookRoute, /response-healing/);
+  assert.match(hookRoute, /length_adjustment_needed/);
+  assert.doesNotMatch(hookRoute, /status: 422/);
+  assert.match(studio, /studio-ai-notice/);
+  assert.match(studio, /Choisir un autre modèle/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/generations/);
   assert.match(imageRoute, /api\.openai\.com\/v1\/images\/edits/);
   assert.match(imageRoute, /gpt-image-2/);
@@ -92,4 +96,109 @@ test("wires real AI packaging, key validation, hook iteration, reference analysi
   assert.match(styleRoute, /image_url/);
   assert.match(styleRoute, /reference-thumbnails/);
   assert.match(hosting, /"r2": "BUCKET"/);
+});
+
+test("returns usable hook copy with a warning instead of HTTP 422", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("hook-warning-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  let responseHealingEnabled = false;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).startsWith("https://openrouter.ai/api/v1/chat/completions")) {
+      calls += 1;
+      const requestBody = JSON.parse(String(init?.body ?? "{}"));
+      responseHealingEnabled = requestBody.plugins?.some(plugin => plugin.id === "response-healing") ?? false;
+      return Response.json({
+        choices: [{ message: { content: JSON.stringify({ hook: "Une accroche encore trop courte", promise: "Une promesse trop courte" }) } }],
+        usage: { prompt_tokens: 10, completion_tokens: 8 },
+      });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const response = await worker.fetch(new Request("http://localhost/api/studio-hook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ apiKey: "test-key", model: "test/model", subject: "Automatiser une tâche répétitive", language: "fr" }),
+    }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(calls, 2);
+    assert.equal(responseHealingEnabled, true);
+    assert.equal(payload.result.hook, "Une accroche encore trop courte");
+    assert.equal(payload.warning.code, "length_adjustment_needed");
+    assert.equal(payload.warning.hookValid, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("parses labelled copy and preserves the untargeted field during iteration", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("hook-iteration-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const originalFetch = globalThis.fetch;
+  const hook = Array.from({ length: 30 }, (_, index) => `mot${index + 1}`).join(" ");
+  const protectedPromise = "Cette promesse existante doit rester exactement identique.";
+  let calls = 0;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).startsWith("https://openrouter.ai/api/v1/chat/completions")) {
+      calls += 1;
+      return Response.json({ choices: [{ message: { content: `HOOK: ${hook}\nPROMESSE: texte proposé par le modèle` } }] });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const response = await worker.fetch(new Request("http://localhost/api/studio-hook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "test-key",
+        model: "test/model",
+        subject: "Automatiser une tâche répétitive",
+        language: "fr",
+        action: "iterate",
+        target: "hook",
+        direction: "Plus direct",
+        currentHook: "Ancien hook",
+        currentPromise: protectedPromise,
+      }),
+    }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(calls, 1);
+    assert.equal(payload.result.hook, hook);
+    assert.equal(payload.result.promise, protectedPromise);
+    assert.equal(payload.warning, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("reports a provider-output failure instead of mislabelling it as HTTP 422", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("hook-invalid-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).startsWith("https://openrouter.ai/api/v1/chat/completions")) {
+      return Response.json({ choices: [{ message: { content: "réponse sans structure exploitable" } }] });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const response = await worker.fetch(new Request("http://localhost/api/studio-hook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ apiKey: "test-key", model: "test/model", subject: "Automatiser une tâche répétitive", language: "fr" }),
+    }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+    const payload = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(payload.error, "openrouter_unusable_hook_response");
+    assert.equal(payload.reason, "invalid_json_or_empty_content");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
