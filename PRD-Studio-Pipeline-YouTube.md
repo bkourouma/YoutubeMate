@@ -6,7 +6,7 @@
 
 ## 1. Vision
 
-Script Studio transforme un simple sujet de vidéo en un script complet prêt à tourner et un packaging YouTube prêt à publier, en suivant un pipeline éditorial en 6 étapes éprouvé sur une vraie chaîne (Envol IA).
+Script Studio transforme un simple sujet de vidéo en un script complet prêt à tourner et un packaging YouTube prêt à publier, en suivant un pipeline éditorial en 7 étapes éprouvé sur une vraie chaîne (Envol IA).
 
 Le produit s'adresse à **tout créateur YouTube, quel que soit son pays ou sa langue** : tout ce qui est propre à une chaîne (audience, langue, ton, textes fixes, offre) est configurable dans un « Profil de chaîne ». La méthode, elle, est fixe.
 
@@ -22,7 +22,7 @@ Différenciateur clé : contrairement aux générateurs de scripts génériques,
 
 1. **Onboarding** : l'utilisateur crée son Profil de chaîne (section 5).
 2. **Nouvelle vidéo** : il saisit un sujet ou mot-clé.
-3. **Pipeline** : il avance à travers 6 étapes (section 6), en mode manuel (étape par étape) ou en mode **Pilote automatique** (l'app enchaîne, mais s'arrête à chaque point d'arrêt obligatoire).
+3. **Pipeline** : il avance à travers 7 étapes (section 6), en mode manuel (étape par étape) ou en mode **Pilote automatique** (l'app enchaîne, mais s'arrête à chaque point d'arrêt obligatoire).
 4. **Livrable** : il exporte le script continu (prompteur) et le packaging (blocs à copier-coller dans YouTube Studio).
 
 Chaque vidéo est un **projet** sauvegardé, avec un statut : Idée → Script en cours → Relu → Packagé → Publié.
@@ -30,7 +30,7 @@ Chaque vidéo est un **projet** sauvegardé, avec un statut : Idée → Script e
 ## 4. Écrans
 
 1. **Tableau de bord** : liste des projets vidéo avec statut, bouton « Nouvelle vidéo ».
-2. **Vue projet / pipeline** : stepper horizontal des 6 étapes avec état (à faire / en cours / validé). Zone centrale : conversation avec l'IA de l'étape + résultat structuré. L'utilisateur peut régénérer, modifier à la main, puis « Valider l'étape » (ce qui verrouille la sortie comme entrée de l'étape suivante).
+2. **Vue projet / pipeline** : stepper horizontal des 7 étapes avec état (à faire / en cours / validé). Zone centrale : conversation avec l'IA de l'étape + résultat structuré. L'utilisateur peut régénérer, modifier à la main, puis « Valider l'étape » (ce qui verrouille la sortie comme entrée de l'étape suivante).
 3. **Mode prompteur** : affichage plein écran du script assemblé (hook + intro + corps + conclusion) en texte continu, gros caractères, défilement, sans les en-têtes internes de travail.
 4. **Profil de chaîne** (réglages) : voir section 5.
 5. **Export** : voir section 8.
@@ -53,7 +53,7 @@ Formulaire rempli à l'onboarding, modifiable à tout moment, injecté dans tout
 
 Les textes fixes du profil sont **sacrés** : l'IA les reproduit mot pour mot, ne les reformule jamais, ne les « modernise » jamais.
 
-## 6. Le pipeline en 6 étapes (règles métier — cœur du produit)
+## 6. Le pipeline en 7 étapes (règles métier — cœur du produit)
 
 Chaque étape est une génération IA avec des instructions système propres. Règles transversales d'abord :
 
@@ -86,9 +86,20 @@ Entrée : promesse + angle validés. Sortie structurée :
 
 Si le hook installe une idée que le corps développera (une douleur, une comparaison), le signaler : le corps devra être raccourci d'autant. Si le hook utilise une analogie implicite, prévoir la phrase d'équivalence au début du corps.
 
-### Étape 3 — Corps du script
+### Étape 3 — Validation des chapitres
 
-Entrée : hook/intro + promesse + durée cible (demander la durée si absente ; défaut : 4–6 min à l'oral, ~600–900 mots). Structure imposée :
+Entrée : hook/intro + promesse + sujet + durée cible. Un modèle OpenRouter puissant compatible raisonnement et sorties structurées, configuré séparément dans le profil, travaille avec un effort de réflexion élevé.
+
+- L'IA choisit **5 à 12 chapitres selon la durée et la complexité réelle du sujet**. La durée fournit une recommandation, pas un nombre imposé.
+- Chaque chapitre contient : titre, objectif, 2 à 5 points clés et cible de mots. L'ensemble des cibles doit correspondre au volume calculé pour le corps.
+- L'utilisateur peut modifier, réordonner, ajouter ou supprimer les chapitres. Le corps n'est jamais rédigé avant validation explicite du plan.
+- Toute modification du plan invalide le corps, la conclusion et la relecture déjà produits.
+
+### Étape 4 — Corps du script
+
+Entrée : plan de chapitres validé + hook/intro + promesse + durée cible. La durée totale par défaut est de 8–12 minutes. Le studio estime le volume à **145 mots/minute**, soustrait les textes protégés et réserve 90 mots pour la conclusion ; une vidéo médiane de 10 minutes vise généralement environ 1 100–1 250 mots de corps.
+
+Le modèle long format développe chaque chapitre une fois et dans l'ordre. Structure éditoriale à répartir dans le plan :
 
 1. **Le problème, en détail** — pourquoi ça concerne le spectateur dans sa réalité.
 2. **L'analogie fil rouge** — UNE seule analogie centrale, filée du début à la fin.
@@ -97,9 +108,9 @@ Entrée : hook/intro + promesse + durée cible (demander la durée si absente ; 
 5. **Nuance honnête** — ce que ça ne fait pas, ce qui reste à surveiller.
 6. **Transition** — une phrase de pont vers la conclusion, sans l'écrire.
 
-Si expliquer correctement exige un détail technique non vérifié : demander à l'utilisateur, ne pas improviser une explication plausible.
+Si expliquer correctement exige un détail technique non vérifié : demander à l'utilisateur, ne pas improviser une explication plausible. La validation est bloquée si la durée complète estimée est inférieure au minimum ou supérieure au maximum du profil. Un corps incomplet déclenche une tentative d'expansion ciblée des chapitres insuffisants.
 
-### Étape 4 — Conclusion & CTA
+### Étape 5 — Conclusion & CTA
 
 Entrée : le corps réellement écrit. Structure :
 
@@ -109,15 +120,15 @@ Entrée : le corps réellement écrit. Structure :
 
 Pas de teaser de prochaine vidéo non confirmé. Ne pas répéter le CTA d'abonnement de l'intro à l'identique (la question d'engagement vient d'abord).
 
-### Étape 5 — Relecture finale
+### Étape 6 — Relecture finale
 
 Entrée : script assemblé (hook + intro + corps + conclusion). L'IA agit en relecteur, **elle ne réécrit pas** : elle produit un verdict par point de contrôle (✅ / ⚠️ / ❌) avec, pour chaque problème, une correction proposée que l'utilisateur accepte ou refuse.
 
 Points de contrôle : la promesse du hook et de l'intro est-elle tenue par le corps ? L'analogie reste-t-elle cohérente de bout en bout ? Un fait/chiffre/citation non vérifié s'est-il glissé ? Du jargon non expliqué ? Les textes fixes du profil sont-ils reproduits mot pour mot ? Le CTA de conclusion est-il redondant avec celui de l'intro ? Le récap de conclusion dépasse-t-il ce qui a été montré ?
 
-**Point d'arrêt obligatoire** : le verdict est présenté à l'utilisateur. S'il y a des ⚠️ ou ❌, l'étape 6 ne se lance pas avant sa décision — même en Pilote automatique.
+**Point d'arrêt obligatoire** : le verdict est présenté à l'utilisateur. S'il y a des ⚠️ ou ❌, l'étape 7 ne se lance pas avant sa décision — même en Pilote automatique.
 
-### Étape 6 — Packaging
+### Étape 7 — Packaging
 
 Entrée : script validé (ou une transcription collée — cette étape doit fonctionner seule, pour les vidéos déjà tournées).
 
@@ -156,7 +167,7 @@ Principe : l'app ne contient aucune clé ni compte partagé. Chaque utilisateur 
 ### 7b. vidIQ (volume de mots-clés et scoring de titres)
 
 - L'utilisateur connecte **son propre compte vidIQ** (connexion au compte ou clé/token API selon ce que vidIQ permet). Aucun compte vidIQ mutualisé.
-- Usages dans le pipeline : à l'étape 1, volume de recherche des mots-clés confirmés ; à l'étape 6, score réel des 6–8 titres candidats (dans la langue principale et la langue secondaire).
+- Usages dans le pipeline : à l'étape 1, volume de recherche des mots-clés confirmés ; à l'étape 7, score réel des 6–8 titres candidats (dans la langue principale et la langue secondaire).
 - Si vidIQ n'est pas connecté ou renvoie une erreur : l'app fonctionne quand même, avec le scoring heuristique IA étiqueté « score estimé » — jamais présenté comme un score vidIQ.
 - Rapporter les scores réels tels quels, sans les arrondir ni présumer qu'une langue score mieux qu'une autre.
 
@@ -183,7 +194,7 @@ Upload/publication directe sur YouTube, analytics de la chaîne, génération d'
 2. Les textes fixes du profil apparaissent mot pour mot dans chaque script généré.
 3. Un hook généré ne dépasse jamais 40 mots ; l'app affiche le compte.
 4. La promesse générée commence toujours par « À la fin de cette vidéo, … » (ou son équivalent dans la langue de la chaîne).
-5. En Pilote automatique, l'app s'arrête : si le sujet est ambigu (étape 1), au verdict de relecture (étape 5), et aux 3 questions du packaging (étape 6).
+5. En Pilote automatique, l'app s'arrête : si le sujet est ambigu (étape 1), à la validation des chapitres (étape 3), au verdict de relecture (étape 6), et aux 3 questions du packaging (étape 7).
 6. Aucun chiffre, timecode ou fait non fourni/vérifié n'apparaît dans une sortie ; les manques sont marqués « non vérifié » ou demandés.
 7. Sans clé YouTube ni compte vidIQ connectés, le pipeline reste utilisable de bout en bout (recherche manuelle, scores étiquetés « estimés »).
 8. Un projet en cours survit à une fermeture du navigateur.
@@ -200,4 +211,4 @@ Upload/publication directe sur YouTube, analytics de la chaîne, génération d'
 - **Phrase de clôture** : « Si tu as aimé, liker et n'oublie pas de t'abonner pour recevoir nos prochaines vidéos. »
 - **Coordonnées** : consultance +225 07 07 66 41 05 · allianceconsultants.net · groupe WhatsApp : https://chat.whatsapp.com/JPmF6GBrDAEB1ETlq3pWYh
 - **Bloc offre** : entreprises → diagnostic IA, agents IA sur mesure (service client WhatsApp/site, suivi commandes), automatisation des tâches répétitives, développement logiciel, formation des équipes ; indépendants/freelances/créateurs → accompagnement individuel pour intégrer l'IA dans leur métier, assistant IA sur les tâches chronophages.
-- **Durée cible par défaut** : 8–12 minutes (corps 4–6 min).
+- **Durée cible par défaut** : 8–12 minutes pour la vidéo complète ; volume du corps calculé à 145 mots/minute après déduction des textes fixes et d'une réserve de conclusion.
