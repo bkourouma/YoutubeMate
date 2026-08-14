@@ -1,5 +1,6 @@
+import { requireApiKey } from "../../server/secrets";
+
 type RequestBody = {
-  apiKey?: string;
   model?: string;
   language?: "fr" | "en";
   inputType?: "script" | "description";
@@ -13,16 +14,14 @@ function parseJsonContent(content: string) {
   return JSON.parse((fenced ?? content).trim());
 }
 
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
-
 export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openrouter");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const source = body.source?.trim() ?? "";
   const model = body.model?.trim();
-  if (!apiKey || !model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
+  if (!model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
   if (source.length < 80 || source.length > 120_000) return Response.json({ error: "invalid_source_length" }, { status: 400 });
 
   const language = body.language === "en" ? "English" : "French";

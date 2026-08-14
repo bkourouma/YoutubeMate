@@ -1,8 +1,7 @@
+import { requireApiKey } from "../../server/secrets";
 import { env } from "cloudflare:workers";
-import { headers } from "next/headers";
 
 type ImageRequest = {
-  apiKey?: string;
   model?: string;
   quality?: "low" | "medium" | "high";
   prompt?: string;
@@ -14,22 +13,17 @@ type ImageRequest = {
 
 const ALLOWED_MODELS = new Set(["gpt-image-2", "gpt-image-1.5"]);
 
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
-
-async function referencePrefix() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id") ?? "local-preview";
+function referencePrefix(userId: string) {
   return `reference-thumbnails/${encodeURIComponent(userId)}/`;
 }
 
 export async function POST(request: Request) {
   const body = await request.json() as ImageRequest;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openai");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const model = body.model?.trim() ?? "gpt-image-2";
   const prompt = body.prompt?.trim() ?? "";
-  if (!apiKey) return Response.json({ error: "openai_key_required" }, { status: 400 });
   if (!ALLOWED_MODELS.has(model)) return Response.json({ error: "unsupported_image_model" }, { status: 400 });
   if (!prompt || prompt.length > 8_000) return Response.json({ error: "invalid_image_prompt" }, { status: 400 });
 
@@ -39,7 +33,7 @@ export async function POST(request: Request) {
     const requestedReferences = (body.referenceKeys ?? []).slice(0, 4);
     let response: Response;
     if (requestedReferences.length) {
-      const prefix = await referencePrefix();
+      const prefix = referencePrefix(guard.userId);
       if (requestedReferences.some(key => !key.startsWith(prefix))) return Response.json({ error: "reference_forbidden" }, { status: 403 });
       const runtime = env as unknown as { BUCKET?: R2Bucket };
       if (!runtime.BUCKET) return Response.json({ error: "reference_storage_unavailable" }, { status: 503 });

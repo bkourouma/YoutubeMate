@@ -6,8 +6,9 @@ type Chapter = {
   targetWords: number;
 };
 
+import { requireApiKey } from "../../server/secrets";
+
 type RequestBody = {
-  apiKey?: string;
   model?: string;
   language?: "fr" | "en";
   action?: "section" | "conclusion";
@@ -34,10 +35,6 @@ type OpenRouterPayload = {
 };
 
 type PreviousSection = { id: string; script: string; transition: string };
-
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
@@ -89,7 +86,9 @@ export async function POST(request: Request) {
   try { rawBody = await request.json(); } catch { return Response.json({ error: "invalid_json_body" }, { status: 400 }); }
   if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) return Response.json({ error: "invalid_request_body" }, { status: 400 });
   const body = rawBody as RequestBody;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openrouter");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
   const subject = typeof body.subject === "string" ? body.subject.trim() : "";
   const action = body.action === "conclusion" || body.action === "section" ? body.action : null;
@@ -97,7 +96,7 @@ export async function POST(request: Request) {
   const chapters = body.chapters ?? [];
   const sectionIndex = Number.isInteger(body.sectionIndex) ? body.sectionIndex as number : -1;
   if (!action) return Response.json({ error: "invalid_action" }, { status: 400 });
-  if (!apiKey || !model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
+  if (!model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
   if (subject.length < 3 || subject.length > 2_000) return Response.json({ error: "invalid_subject" }, { status: 400 });
   if (action === "section" && (!validChapters(chapters) || new Set(chapters.map(chapter => chapter.id)).size !== chapters.length)) return Response.json({ error: "validated_chapters_required" }, { status: 400 });
   if (action === "section" && Math.abs(chapters.reduce((sum, chapter) => sum + chapter.targetWords, 0) - targetBodyWords) > Math.max(100, targetBodyWords * 0.2)) return Response.json({ error: "incoherent_chapter_targets" }, { status: 400 });

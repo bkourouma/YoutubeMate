@@ -1,3 +1,5 @@
+import { requireApiKey } from "../../server/secrets";
+
 type ChapterDraft = {
   title?: unknown;
   objective?: unknown;
@@ -6,7 +8,6 @@ type ChapterDraft = {
 };
 
 type RequestBody = {
-  apiKey?: string;
   model?: string;
   language?: "fr" | "en";
   subject?: string;
@@ -23,10 +24,6 @@ type OpenRouterPayload = {
   error?: { message?: string; metadata?: { error_type?: string } };
   usage?: unknown;
 };
-
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
@@ -79,12 +76,14 @@ export async function POST(request: Request) {
   try { rawBody = await request.json(); } catch { return Response.json({ error: "invalid_json_body" }, { status: 400 }); }
   if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) return Response.json({ error: "invalid_request_body" }, { status: 400 });
   const body = rawBody as RequestBody;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openrouter");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
   const subject = typeof body.subject === "string" ? body.subject.trim() : "";
   const targetBodyWords = clamp(typeof body.targetBodyWords === "number" && Number.isFinite(body.targetBodyWords) ? body.targetBodyWords : 1_000, 650, 4_000);
   const requestedChapterCount = clamp(typeof body.chapterCount === "number" && Number.isFinite(body.chapterCount) ? body.chapterCount : 7, 5, 12);
-  if (!apiKey || !model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
+  if (!model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
   if (subject.length < 3 || subject.length > 2_000) return Response.json({ error: "invalid_subject" }, { status: 400 });
 
   const language = body.language === "en" ? "English" : "French";

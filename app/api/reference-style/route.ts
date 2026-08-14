@@ -1,8 +1,7 @@
+import { requireApiKey } from "../../server/secrets";
 import { env } from "cloudflare:workers";
-import { headers } from "next/headers";
 
 type RequestBody = {
-  apiKey?: string;
   model?: string;
   referenceKeys?: string[];
   currentPrompt?: string;
@@ -11,32 +10,28 @@ type RequestBody = {
   profile?: { channel?: string; theme?: string; audience?: string; tone?: string };
 };
 
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
-
 function bucket() {
   const runtime = env as unknown as { BUCKET?: R2Bucket };
   if (!runtime.BUCKET) throw new Error("reference_storage_unavailable");
   return runtime.BUCKET;
 }
 
-async function userPrefix() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id") ?? "local-preview";
+function userPrefix(userId: string) {
   return `reference-thumbnails/${encodeURIComponent(userId)}/`;
 }
 
 export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openrouter");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const model = body.model?.trim();
   const keys = (body.referenceKeys ?? []).slice(0, 4);
-  if (!apiKey || !model) return Response.json({ error: "vision_configuration_required" }, { status: 400 });
+  if (!model) return Response.json({ error: "vision_configuration_required" }, { status: 400 });
   if (!keys.length) return Response.json({ error: "reference_required" }, { status: 400 });
 
   try {
-    const prefix = await userPrefix();
+    const prefix = userPrefix(guard.userId);
     if (keys.some(key => !key.startsWith(prefix))) return Response.json({ error: "reference_forbidden" }, { status: 403 });
     const objects = await Promise.all(keys.map(key => bucket().get(key)));
     if (objects.some(object => !object)) return Response.json({ error: "reference_not_found" }, { status: 404 });

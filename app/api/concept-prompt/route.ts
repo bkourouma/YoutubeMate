@@ -1,5 +1,6 @@
+import { requireApiKey } from "../../server/secrets";
+
 type RequestBody = {
-  apiKey?: string;
   model?: string;
   language?: "fr" | "en";
   topic?: string;
@@ -10,10 +11,6 @@ type RequestBody = {
   direction?: string;
   profile?: { channel?: string; theme?: string; thumbnailSystemPrompt?: string };
 };
-
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
 
 function parseJsonContent(content: string) {
   const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
@@ -31,13 +28,15 @@ export async function POST(request: Request) {
   try { rawBody = await request.json(); } catch { return Response.json({ error: "invalid_json_body" }, { status: 400 }); }
   if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) return Response.json({ error: "invalid_request_body" }, { status: 400 });
   const body = rawBody as RequestBody;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openrouter");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
   const safe = (value: unknown, maximum: number) => typeof value === "string" ? value.trim().slice(0, maximum) : "";
   const title = safe(body.title, 300);
   const currentPrompt = safe(body.currentPrompt, 4_000);
   const language = body.language === "en" ? "English" : "French";
-  if (!apiKey || !model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
+  if (!model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
   if (!title && !currentPrompt) return Response.json({ error: "invalid_request" }, { status: 400 });
 
   const direction = safe(body.direction, 1_500);

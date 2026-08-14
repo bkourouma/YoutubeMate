@@ -1,7 +1,8 @@
+import { requireApiKey } from "../../server/secrets";
+
 type HookTarget = "hook" | "promise" | "both";
 
 type RequestBody = {
-  apiKey?: string;
   model?: string;
   language?: "fr" | "en";
   action?: "generate" | "iterate";
@@ -23,10 +24,6 @@ type OpenRouterPayload = {
   error?: { message?: string };
   usage?: unknown;
 };
-
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
 
 function textContent(value: unknown) {
   if (typeof value === "string") return value;
@@ -78,13 +75,15 @@ function countWords(value: string) {
 
 export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openrouter");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const model = body.model?.trim();
   const subject = body.subject?.trim() ?? "";
   const action = body.action === "iterate" ? "iterate" : "generate";
   const target: HookTarget = body.target === "hook" || body.target === "promise" ? body.target : "both";
   const direction = body.direction?.trim() ?? "";
-  if (!apiKey || !model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
+  if (!model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
   if (subject.length < 3 || subject.length > 2_000) return Response.json({ error: "invalid_subject" }, { status: 400 });
   if (action === "iterate" && (!direction || direction.length > 2_000)) return Response.json({ error: "iteration_direction_required" }, { status: 400 });
 

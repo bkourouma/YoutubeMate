@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
+
+// The routes now require a signed-in identity and resolve keys server-side. The test
+// user is also the admin, so the environment fallback stands in for a stored key.
+const TEST_USER = "test-user";
+process.env.ADMIN_USER_ID ??= TEST_USER;
+process.env.OPENROUTER_API_KEY ??= "test-openrouter-key";
+process.env.OPENAI_API_KEY ??= "test-openai-key";
+const signedIn = { "content-type": "application/json", "oai-authenticated-user-id": TEST_USER };
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -48,7 +57,7 @@ test("wires real AI packaging, long-form writing, key validation, hook iteration
     readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openrouter-models/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/openrouter-key/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/integrations/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/studio-hook/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/studio-chapters/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/studio-write/route.ts", import.meta.url), "utf8"),
@@ -57,13 +66,11 @@ test("wires real AI packaging, long-form writing, key validation, hook iteration
     readFile(new URL("../app/api/reference-style/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
   ]);
-  assert.match(studio, /Clés IA & modèles/);
+  assert.match(studio, /Clés & connexions/);
   assert.match(studio, /in \{formatTokenPrice\(model\.inputPerToken\)\}\/M/);
   assert.match(studio, /Miniatures générées par OpenAI/);
-  assert.match(studio, /MÉMORISÉ SUR CET APPAREIL/);
-  assert.match(studio, /Mémoriser mes clés sur cet appareil/);
-  assert.match(studio, /Tester la clé/);
-  assert.match(studio, /script-studio-ai-credentials/);
+  assert.match(studio, /CHIFFRÉ · LIÉ À VOTRE COMPTE/);
+  assert.match(studio, /Tester et enregistrer/);
   assert.match(studio, /ADN visuel des miniatures/);
   assert.match(studio, /Itérer avec l’IA/);
   assert.match(studio, /Bloc automatique de description/);
@@ -80,7 +87,7 @@ test("wires real AI packaging, long-form writing, key validation, hook iteration
   assert.match(modelsRoute, /supportsWriter/);
   assert.match(textRoute, /openrouter\.ai\/api\/v1\/chat\/completions/);
   assert.match(keyRoute, /openrouter\.ai\/api\/v1\/key/);
-  assert.match(keyRoute, /openrouter_key_rejected/);
+  assert.match(keyRoute, /secret_rejected/);
   assert.match(textRoute, /"options":\["answer A","answer B","answer C"\]/);
   assert.match(textRoute, /correctOption/);
   assert.match(textRoute, /descriptionFooter/);
@@ -132,7 +139,7 @@ test("plans 5-12 chapters with a dedicated high-reasoning model", { concurrency:
   try {
     const response = await worker.fetch(new Request("http://localhost/api/studio-chapters", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: signedIn,
       body: JSON.stringify({
         apiKey: "test-key",
         model: "openai/test-reasoning-model",
@@ -193,7 +200,7 @@ test("writes exactly one validated chapter per request", { concurrency: false },
   try {
     const response = await worker.fetch(new Request("http://localhost/api/studio-write", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: signedIn,
       body: JSON.stringify({
         apiKey: "test-key",
         model: "openai/test-reasoning-model",
@@ -239,8 +246,8 @@ test("rejects the retired monolithic body action", { concurrency: false }, async
   try {
     const response = await worker.fetch(new Request("http://localhost/api/studio-write", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ apiKey: "test-key", model: "openai/test-reasoning-model", action: "body", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters: testChapters() }),
+      headers: signedIn,
+      body: JSON.stringify({ model: "openai/test-reasoning-model", action: "body", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters: testChapters() }),
     }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
     const payload = await response.json();
     assert.equal(response.status, 400);
@@ -270,8 +277,8 @@ test("repairs an underdeveloped chapter and reports the remaining deficit", { co
   try {
     const response = await worker.fetch(new Request("http://localhost/api/studio-write", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ apiKey: "test-key", model: "openai/test-reasoning-model", action: "section", language: "fr", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters, sectionIndex: 0, previousSections: [] }),
+      headers: signedIn,
+      body: JSON.stringify({ model: "openai/test-reasoning-model", action: "section", language: "fr", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters, sectionIndex: 0, previousSections: [] }),
     }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
     const payload = await response.json();
     assert.equal(response.status, 200);
@@ -303,8 +310,8 @@ test("does not bill a repair after a provider error embedded in HTTP 200", { con
   try {
     const response = await worker.fetch(new Request("http://localhost/api/studio-write", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ apiKey: "test-key", model: "openai/test-reasoning-model", action: "section", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters, sectionIndex: 0, previousSections: [] }),
+      headers: signedIn,
+      body: JSON.stringify({ model: "openai/test-reasoning-model", action: "section", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters, sectionIndex: 0, previousSections: [] }),
     }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
     const payload = await response.json();
     assert.equal(response.status, 502);
@@ -367,8 +374,8 @@ test("returns usable hook copy with a warning instead of HTTP 422", { concurrenc
   try {
     const response = await worker.fetch(new Request("http://localhost/api/studio-hook", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ apiKey: "test-key", model: "test/model", subject: "Automatiser une tâche répétitive", language: "fr" }),
+      headers: signedIn,
+      body: JSON.stringify({ model: "test/model", subject: "Automatiser une tâche répétitive", language: "fr" }),
     }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
     const payload = await response.json();
     assert.equal(response.status, 200);
@@ -400,7 +407,7 @@ test("parses labelled copy and preserves the untargeted field during iteration",
   try {
     const response = await worker.fetch(new Request("http://localhost/api/studio-hook", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: signedIn,
       body: JSON.stringify({
         apiKey: "test-key",
         model: "test/model",
@@ -438,8 +445,8 @@ test("reports a provider-output failure instead of mislabelling it as HTTP 422",
   try {
     const response = await worker.fetch(new Request("http://localhost/api/studio-hook", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ apiKey: "test-key", model: "test/model", subject: "Automatiser une tâche répétitive", language: "fr" }),
+      headers: signedIn,
+      body: JSON.stringify({ model: "test/model", subject: "Automatiser une tâche répétitive", language: "fr" }),
     }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
     const payload = await response.json();
     assert.equal(response.status, 502);
@@ -448,6 +455,34 @@ test("reports a provider-output failure instead of mislabelling it as HTTP 422",
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("never accepts a client-supplied API key and never invents an identity", async () => {
+  const apiDir = new URL("../app/api/", import.meta.url);
+  const routes = (await readdir(apiDir, { recursive: true, withFileTypes: true }))
+    .filter(entry => entry.isFile() && entry.name === "route.ts")
+    .map(entry => join(entry.parentPath ?? entry.path, entry.name));
+  assert.ok(routes.length >= 10, "expected the API surface to be discovered");
+  const spenders = [];
+  for (const file of routes) {
+    const source = await readFile(file, "utf8");
+    const name = file.replace(/\\/g, "/").split("/app/api/")[1];
+    // A key in the request body would mean the browser still holds it.
+    assert.doesNotMatch(source, /apiKey\?: string/, `${name} declares apiKey in its request body`);
+    // A shared fallback identity would let an anonymous caller spend someone else's credits.
+    assert.doesNotMatch(source, /"local-preview"/, `${name} falls back to a shared identity`);
+    if (/openrouter\.ai|api\.openai\.com/.test(source) && name !== "integrations/route.ts" && name !== "openrouter-models/route.ts") {
+      spenders.push(name);
+      assert.match(source, /requireApiKey\(/, `${name} spends credits without resolving a per-user key`);
+    }
+  }
+  assert.ok(spenders.length >= 5, `expected several credential-spending routes, found ${spenders.join(", ")}`);
+  const secrets = await readFile(new URL("../app/server/secrets.ts", import.meta.url), "utf8");
+  assert.match(secrets, /AES-GCM/);
+  assert.match(secrets, /additionalData/);
+  assert.match(secrets, /settings_encryption_key_missing/);
+  // The environment fallback must stay admin-only, or anonymous callers spend the deployment's keys.
+  assert.match(secrets, /isAdminUser\(userId\) \? environmentValue\(service\) : ""/);
 });
 
 test("bounds every AI call and resumes an interrupted body without losing paid chapters", async () => {

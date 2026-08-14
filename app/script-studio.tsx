@@ -53,10 +53,20 @@ type OpenRouterModel = {
   supportsReasoning: boolean; supportsStructuredOutputs: boolean; supportsWriter: boolean; supportedEfforts: string[] | null;
 };
 type ReferenceThumbnail = { key: string; name: string; contentType: string; size: number; uploadedAt: string; url: string };
+// Model choices only. API keys never live in the browser: they are stored encrypted
+// per user on the server and resolved by each route.
 type AiSettings = {
-  openaiKey: string; openrouterKey: string; openrouterModel: string; writerModel: string; visionModel: string;
+  openrouterModel: string; writerModel: string; visionModel: string;
   imageModel: "gpt-image-2" | "gpt-image-1.5"; imageQuality: "low" | "medium" | "high";
-  rememberKeys: boolean;
+};
+type IntegrationService = "openrouter" | "openai" | "descript";
+type IntegrationState = { configured: boolean; source: "user" | "environment" | "none"; last4: string; updatedAt: string | null };
+type Integrations = Record<IntegrationService, IntegrationState>;
+
+const emptyIntegrations: Integrations = {
+  openrouter: { configured: false, source: "none", last4: "", updatedAt: null },
+  openai: { configured: false, source: "none", last4: "", updatedAt: null },
+  descript: { configured: false, source: "none", last4: "", updatedAt: null },
 };
 
 type ExpressState = {
@@ -275,7 +285,9 @@ export default function ScriptStudio() {
   const [profile, setProfile] = useState(profileDemo);
   const [projects, setProjects] = useState(demoProjects);
   const [express, setExpress] = useState<ExpressState>(expressDefault);
-  const [aiSettings, setAiSettings] = useState<AiSettings>({ openaiKey: "", openrouterKey: "", openrouterModel: "", writerModel: "", visionModel: "", imageModel: "gpt-image-2", imageQuality: "medium", rememberKeys: false });
+  const [aiSettings, setAiSettings] = useState<AiSettings>({ openrouterModel: "", writerModel: "", visionModel: "", imageModel: "gpt-image-2", imageQuality: "medium" });
+  const [integrations, setIntegrations] = useState<Integrations>(emptyIntegrations);
+  const [legacyKeysFound, setLegacyKeysFound] = useState(false);
   const [credentialsHydrated, setCredentialsHydrated] = useState(false);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [referenceThumbnails, setReferenceThumbnails] = useState<ReferenceThumbnail[]>([]);
@@ -315,10 +327,12 @@ export default function ScriptStudio() {
         setProfile(nextProfile); setProjects(nextProjects); setActiveId(nextProjects.some((item: Project) => item.id === parsed.activeId) ? parsed.activeId : nextProjects[0].id); setExpress(parsed.express ?? expressDefault);
       } catch { /* retain demo */ }
     }
+    // Keys used to live here. They now belong to the server, and we never upload a
+    // secret the user chose to keep local — we only flag it so they can re-enter it once.
     if (savedCredentials) {
       try {
-        const parsed = JSON.parse(savedCredentials) as Partial<AiSettings>;
-        setAiSettings(current => ({ ...current, ...parsed, rememberKeys: true }));
+        const parsed = JSON.parse(savedCredentials) as Record<string, unknown>;
+        if (parsed.openrouterKey || parsed.openaiKey) setLegacyKeysFound(true); else localStorage.removeItem("script-studio-ai-credentials");
       } catch { localStorage.removeItem("script-studio-ai-credentials"); }
     }
     if (savedPreferences) {
@@ -337,14 +351,12 @@ export default function ScriptStudio() {
     }).catch(() => null).finally(() => setHydrated(true));
   }, []);
 
-  useEffect(() => {
-    if (!credentialsHydrated) return;
-    if (aiSettings.rememberKeys) {
-      localStorage.setItem("script-studio-ai-credentials", JSON.stringify(aiSettings));
-    } else {
-      localStorage.removeItem("script-studio-ai-credentials");
-    }
-  }, [aiSettings, credentialsHydrated]);
+  const refreshIntegrations = useCallback(() => {
+    fetch("/api/integrations").then(response => response.json() as Promise<{ integrations?: Integrations }>)
+      .then(data => { if (data.integrations) setIntegrations(data.integrations); }).catch(() => null);
+  }, []);
+
+  useEffect(() => { refreshIntegrations(); }, [refreshIntegrations]);
 
   useEffect(() => {
     fetch("/api/openrouter-models").then(response => response.json() as Promise<{ models?: OpenRouterModel[] }>).then(data => {
@@ -451,7 +463,7 @@ export default function ScriptStudio() {
 
   const runHookAi = async (action: "generate" | "iterate", target: HookIterationTarget = "both", direction = "") => {
     if (studioAiLoading) return false;
-    if (!aiSettings.openrouterKey || !aiSettings.openrouterModel) {
+    if (!integrations.openrouter.configured || !aiSettings.openrouterModel) {
       showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle dans le profil." : "Add your OpenRouter key and choose a model in the profile.", "warning");
       return false;
     }
@@ -459,7 +471,6 @@ export default function ScriptStudio() {
     setStudioAiNotice(null);
     try {
       const response = await postJsonWithRetry("/api/studio-hook", {
-        apiKey: aiSettings.openrouterKey,
         model: aiSettings.openrouterModel,
         language: lang,
         action,
@@ -515,7 +526,7 @@ export default function ScriptStudio() {
   };
 
   const writerReady = () => {
-    if (aiSettings.openrouterKey && aiSettings.writerModel) return true;
+    if (integrations.openrouter.configured && aiSettings.writerModel) return true;
     showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez le modèle de scénarisation dans le profil." : "Add your OpenRouter key and choose the long-form writing model in your profile.", "error");
     return false;
   };
@@ -526,7 +537,7 @@ export default function ScriptStudio() {
     setStudioAiLoading(true); setStudioAiNotice(null);
     try {
       const response = await postJsonWithRetry("/api/studio-chapters", {
-        apiKey: aiSettings.openrouterKey, model: aiSettings.writerModel, language: lang, subject: project.subject,
+        model: aiSettings.writerModel, language: lang, subject: project.subject,
         duration: profile.duration, targetBodyWords: plan.targetBodyWords, chapterCount: plan.chapterCount,
         hook: project.hook, promise: project.promise,
         profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone },
@@ -555,7 +566,7 @@ export default function ScriptStudio() {
     try {
       if (action === "body") return await runBodySections(plan);
       const response = await postJsonWithRetry("/api/studio-write", {
-        apiKey: aiSettings.openrouterKey, model: aiSettings.writerModel, language: lang, action: "conclusion",
+        model: aiSettings.writerModel, language: lang, action: "conclusion",
         subject: project.subject, duration: profile.duration, targetBodyWords: project.bodyWordTarget || plan.targetBodyWords,
         hook: project.hook, promise: project.promise, body: project.body, chapters: project.chapters,
         profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, closing: profile.closing },
@@ -610,7 +621,7 @@ export default function ScriptStudio() {
       let response: Response;
       try {
         response = await postJsonWithRetry("/api/studio-write", {
-          apiKey: aiSettings.openrouterKey, model: aiSettings.writerModel, language: lang, action: "section",
+          model: aiSettings.writerModel, language: lang, action: "section",
           subject: project.subject, duration: profile.duration, targetBodyWords,
           hook: project.hook, promise: project.promise, chapters, sectionIndex: index,
           previousSections: sections.slice(-2).map(({ id, script, transition }) => ({ id, script, transition })),
@@ -716,7 +727,7 @@ export default function ScriptStudio() {
             {t.steps.map((label, index) => { const number = index + 1; const state: StepState = project.step === number ? "active" : project.completed.includes(number) ? "done" : "todo"; return <button key={label} className={`step ${state}`} onClick={() => navigateStep(number)}><span>{state === "done" ? "✓" : number}</span><small>{label}</small></button>; })}
           </section>
           <div className="workspace">
-            <section className="editor"><Stage project={project} profile={profile} t={t} lang={lang} updateProject={updateProject} generate={generateStep} copy={copy} showToast={showToast} aiLoading={studioAiLoading} bodyProgress={bodyProgress} aiModel={aiSettings.openrouterModel} writerModel={aiSettings.writerModel} iterateHook={(target, direction) => runHookAi("iterate", target, direction)} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} script={script} />
+            <section className="editor"><Stage project={project} profile={profile} t={t} lang={lang} updateProject={updateProject} generate={generateStep} copy={copy} showToast={showToast} aiLoading={studioAiLoading} bodyProgress={bodyProgress} integrations={integrations} aiModel={aiSettings.openrouterModel} writerModel={aiSettings.writerModel} iterateHook={(target, direction) => runHookAi("iterate", target, direction)} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} script={script} />
               {studioAiNotice?.projectId === activeId && <div className={`studio-ai-notice ${studioAiNotice.kind}`} role={studioAiNotice.kind === "error" ? "alert" : "status"}>
                 <span>{studioAiNotice.kind === "error" ? "!" : "i"}</span>
                 <div><strong>{studioAiNotice.kind === "error" ? (lang === "fr" ? "La génération n’a pas abouti" : "Generation did not complete") : (lang === "fr" ? "Ajustement conseillé" : "Adjustment recommended")}</strong><p>{studioAiNotice.message}</p><div><button onClick={generateStep} disabled={studioAiLoading}>↻ {lang === "fr" ? "Réessayer" : "Retry"}</button><button onClick={() => setView("profile")}>{lang === "fr" ? "Choisir un autre modèle" : "Choose another model"}</button></div></div>
@@ -728,8 +739,8 @@ export default function ScriptStudio() {
           </div>
         </>}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
-        {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} />}
-        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
+        {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} />}
+        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
       </main>
       {newOpen && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title"><button className="modal-close" onClick={() => setNewOpen(false)}>×</button><span className="eyebrow">{lang === "fr" ? "NOUVEAU PROJET" : "NEW PROJECT"}</span><h2 id="new-project-title">{t.addSubject}</h2><p>{lang === "fr" ? "Soyez précis : le studio ne recherchera jamais une catégorie plus large." : "Be specific: the studio will never research a broader category."}</p><textarea value={newSubject} maxLength={2000} onChange={e => setNewSubject(e.target.value)} placeholder={lang === "fr" ? "Ex. Comment utiliser l’IA pour répondre aux clients sur WhatsApp Business" : "E.g. How to use AI to answer customers on WhatsApp Business"} /><div className="modal-actions"><button className="ghost" onClick={() => setNewOpen(false)}>{t.cancel}</button><button className="primary" onClick={createProject}>{t.create} →</button></div></div></div>}
       {alerts.length > 0 && <div className="alert-stack" aria-live="polite" aria-relevant="additions" onMouseEnter={() => setAlertsPaused(true)} onMouseLeave={() => setAlertsPaused(false)} onFocusCapture={() => setAlertsPaused(true)} onBlurCapture={() => setAlertsPaused(false)}>
@@ -748,7 +759,7 @@ export default function ScriptStudio() {
 function NavButton({ active, icon, label, count, onClick }: { active: boolean; icon: string; label: string; count?: number; onClick: () => void }) { return <button className={active ? "active" : ""} onClick={onClick}><span>{icon}</span>{label}{count !== undefined && <i>{count}</i>}</button>; }
 function Guard({ label }: { label: string }) { return <div className="guard-item"><span>✓</span>{label}</div>; }
 
-function Stage({ project, profile, t, lang, updateProject, generate, copy, showToast, aiLoading, bodyProgress, aiModel, writerModel, iterateHook, aiSettings, referenceThumbnails, openAiSettings, script }: { project: Project; profile: Profile; t: (typeof labels)[Lang]; lang: Lang; updateProject: (p: Partial<Project>) => void; generate: () => void; copy: (v: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiLoading: boolean; bodyProgress: { current: number; total: number; title: string; retrying: boolean } | null; aiModel: string; writerModel: string; iterateHook: (target: HookIterationTarget, direction: string) => Promise<boolean>; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void; script: string }) {
+function Stage({ project, profile, t, lang, updateProject, generate, copy, showToast, aiLoading, bodyProgress, integrations, aiModel, writerModel, iterateHook, aiSettings, referenceThumbnails, openAiSettings, script }: { project: Project; profile: Profile; t: (typeof labels)[Lang]; lang: Lang; updateProject: (p: Partial<Project>) => void; generate: () => void; copy: (v: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiLoading: boolean; integrations: Integrations; bodyProgress: { current: number; total: number; title: string; retrying: boolean } | null; aiModel: string; writerModel: string; iterateHook: (target: HookIterationTarget, direction: string) => Promise<boolean>; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void; script: string }) {
   const wc = wordCount(project.hook); const title = t.steps[project.step - 1]; const plan = scriptPlan(profile, project);
   const [iterationTarget, setIterationTarget] = useState<HookIterationTarget>("both");
   const [hookDirection, setHookDirection] = useState("");
@@ -780,7 +791,7 @@ function Stage({ project, profile, t, lang, updateProject, generate, copy, showT
   if (project.step === 4) { const bodyWords = wordCount(project.body); const inRange = bodyWords >= plan.minimumBodyWords && bodyWords <= plan.maximumBodyWords; return <><StageHead n={4} title={title} desc={lang === "fr" ? `Corps long format fondé sur les ${project.chapters.length} chapitres validés.` : `Long-form body based on the ${project.chapters.length} approved chapters.`} /><div className={`body-target ${inRange ? "ready" : "short"}`}><div><strong>{bodyWords.toLocaleString(lang)} / {(project.bodyWordTarget || plan.targetBodyWords).toLocaleString(lang)} {t.words}</strong><small>{lang === "fr" ? `Minimum ${plan.minimumBodyWords.toLocaleString(lang)} mots pour ${plan.minimum} min` : `Minimum ${plan.minimumBodyWords.toLocaleString(lang)} words for ${plan.minimum} min`}</small></div><div><strong>≈ {plan.estimatedMinutes.toFixed(1)} min</strong><small>{lang === "fr" ? "vidéo complète estimée" : "estimated full video"}</small></div><span><i style={{ width: `${Math.min(100, bodyWords / Math.max(1, project.bodyWordTarget || plan.targetBodyWords) * 100)}%` }} /></span></div>{!project.body ? <EmptyGenerate onClick={generate} t={t} lang={lang} busy={aiLoading} busyLabel={bodyProgress ? (lang === "fr" ? `L’IA rédige le chapitre ${bodyProgress.current}/${bodyProgress.total} — ${bodyProgress.title}…` : `AI is writing chapter ${bodyProgress.current}/${bodyProgress.total} — ${bodyProgress.title}…`) : undefined} /> : <><div className={`ai-generated-note ${project.bodyGeneratedByAi ? "verified" : "manual"}`}><span>{project.bodyGeneratedByAi ? "✦" : "✎"}</span><div><strong>{aiLoading && bodyProgress ? (lang === "fr" ? `Rédaction en cours — chapitre ${bodyProgress.current}/${bodyProgress.total}` : `Writing in progress — chapter ${bodyProgress.current}/${bodyProgress.total}`) : project.bodyGeneratedByAi ? (lang === "fr" ? "Corps long généré avec réflexion élevée" : "Long-form body generated with high reasoning") : (lang === "fr" ? "Corps modifié manuellement" : "Manually edited body")}</strong><small>{project.bodyModel || writerModel}</small></div></div><OutputBlock label={lang === "fr" ? "CORPS DU SCRIPT" : "SCRIPT BODY"} value={project.body} onChange={v => updateProject({ body: v, bodySections: undefined, bodyGeneratedByAi: false, conclusion: "", reviewAccepted: false, completed: project.completed.filter(number => number < 4) })} copy={() => copy(project.body)} rows={28} readOnly={aiLoading} meta={<span className={bodyWords < plan.minimumBodyWords ? "danger" : "good"}>{bodyWords} {t.words}</span>} /></>}</> }
   if (project.step === 5) return <><StageHead n={5} title={title} desc={lang === "fr" ? "L’IA récapitule uniquement ce que le corps validé a réellement démontré." : "AI recaps only what the approved body actually demonstrated."} />{!project.conclusion ? <EmptyGenerate onClick={generate} t={t} lang={lang} /> : <><div className="ai-generated-note verified"><span>✦</span><div><strong>{lang === "fr" ? "Conclusion générée depuis le corps complet" : "Conclusion generated from the complete body"}</strong><small>{writerModel} · high thinking</small></div></div><OutputBlock label="CONCLUSION" value={project.conclusion} onChange={v => updateProject({ conclusion: v, reviewAccepted: false, completed: project.completed.filter(number => number < 5) })} copy={() => copy(project.conclusion)} rows={10} meta={<span>{wordCount(project.conclusion)} {t.words}</span>} /><div className="locked-line"><span>⌕</span>{profile.closing}</div></>}</>;
   if (project.step === 6) { const chaptersCovered = project.chapters.length >= 5 && project.chapters.every((_, index) => project.body.includes(`CHAPITRE ${index + 1}`)); const durationValid = plan.estimatedMinutes >= plan.minimum && plan.estimatedMinutes <= plan.maximum; return <><StageHead n={6} title={title} desc={lang === "fr" ? "Le relecteur signale les contrôles automatiques et ceux qui exigent votre jugement." : "The reviewer separates automatic checks from those requiring your judgment."} /><div className="stop-banner"><span>Ⅱ</span><div><strong>{t.mandatoryStop}</strong><p>{lang === "fr" ? "Même en Pilote automatique, vous décidez avant le packaging." : "Even in Autopilot, you decide before packaging."}</p></div></div><div className="review-list"><Review status="warn" label={lang === "fr" ? "Vérifiez que le corps tient réellement la promesse" : "Confirm that the body truly fulfils the promise"} detail={lang === "fr" ? "Ce contrôle sémantique reste une décision humaine." : "This semantic check remains a human decision."} /><Review status={chaptersCovered ? "ok" : "warn"} label={chaptersCovered ? (lang === "fr" ? `${project.chapters.length} chapitres présents dans l’ordre` : `${project.chapters.length} chapters present in order`) : (lang === "fr" ? "Un ou plusieurs chapitres sont absents" : "One or more chapters are missing")} /><Review status={durationValid ? "ok" : "warn"} label={lang === "fr" ? `${wordCount(project.body)} mots · environ ${plan.estimatedMinutes.toFixed(1)} minutes` : `${wordCount(project.body)} words · about ${plan.estimatedMinutes.toFixed(1)} minutes`} /><Review status="warn" label={lang === "fr" ? "Vérifiez les faits, chiffres et sources avant publication" : "Verify facts, figures, and sources before publishing"} detail={lang === "fr" ? "Le studio n’affirme pas avoir vérifié automatiquement des sources absentes." : "The studio does not claim to have automatically verified missing sources."} /></div><label className="decision"><input type="checkbox" checked={project.reviewAccepted} onChange={e => updateProject({ reviewAccepted: e.target.checked })} /><span><strong>{lang === "fr" ? "J’ai effectué les vérifications humaines" : "I completed the human checks"}</strong><small>{lang === "fr" ? "Cette décision déverrouille l’étape 7." : "This decision unlocks step 7."}</small></span></label></>; }
-  return <StudioPackaging project={project} profile={profile} updateProject={updateProject} lang={lang} t={t} copy={copy} showToast={showToast} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={openAiSettings} script={script} />;
+  return <StudioPackaging project={project} profile={profile} updateProject={updateProject} lang={lang} t={t} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} openAiSettings={openAiSettings} script={script} />;
 }
 
 function StageHead({ n, title, desc }: { n: number; title: string; desc: string }) { return <div className="stage-head"><span>ÉTAPE {n} / 7</span><h1>{title}</h1><p>{desc}</p></div>; }
@@ -800,9 +811,9 @@ function quizClipboard(item: PackagingResult["quiz"][number], lang: Lang) {
   return `${item.question}\n${choices.map((choice, index) => `${letters[index]}. ${choice}`).join("\n")}\n${lang === "fr" ? "Bonne réponse" : "Correct answer"}: ${letters[item.correctOption ?? 0]}`;
 }
 
-function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, referenceThumbnails, openAiSettings, autoStart, embedded }: {
+function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, integrations, referenceThumbnails, openAiSettings, autoStart, embedded }: {
   value: ExpressState; setValue: (value: ExpressState) => void; profile: Profile; lang: Lang;
-  copy: (value: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void;
+  copy: (value: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiSettings: AiSettings; integrations: Integrations; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void;
   autoStart?: boolean; embedded?: boolean;
 }) {
   const [loading, setLoading] = useState<"package" | "images" | null>(null);
@@ -811,7 +822,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
   const [promptEditor, setPromptEditor] = useState<{ optionId: string; index: number; draft: string; direction: string } | null>(null);
   const [promptLoading, setPromptLoading] = useState(false);
   const update = (patch: Partial<ExpressState>) => setValue({ ...value, ...patch });
-  const configured = Boolean(aiSettings.openrouterKey && aiSettings.openrouterModel);
+  const configured = Boolean(integrations.openrouter.configured && aiSettings.openrouterModel);
   const autoStarted = useRef(false);
 
   const savePrompt = () => {
@@ -829,7 +840,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     setPromptLoading(true);
     try {
       const response = await postJsonWithRetry("/api/concept-prompt", {
-        apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang,
+        model: aiSettings.openrouterModel, language: lang,
         topic: value.package?.topic ?? value.subject, title: option.title, overlay: option.overlay,
         conceptName: option.concepts[promptEditor.index]?.name ?? "", currentPrompt: promptEditor.draft, direction: promptEditor.direction,
         profile: { channel: profile.channel, theme: profile.theme, thumbnailSystemPrompt: profile.thumbnailSystemPrompt },
@@ -856,7 +867,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     if (!configured) return showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle." : "Add your OpenRouter key and choose a model.", "warning");
     setLoading("package");
     try {
-      const response = await postJsonWithRetry("/api/openrouter-generate", { apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt, descriptionFooter: profile.descriptionFooter } });
+      const response = await postJsonWithRetry("/api/openrouter-generate", { model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt, descriptionFooter: profile.descriptionFooter } });
       const data = await response.json() as { result?: PackagingResult; error?: string; detail?: string };
       if (response.status === 401) throw new Error(lang === "fr" ? "Clé OpenRouter refusée. Testez-la dans le profil." : "OpenRouter rejected the key. Test it in your profile.");
       if (!response.ok || !data.result) throw new Error(data.detail || data.error || "generation_failed");
@@ -893,7 +904,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
   };
 
   const generateThumbnails = async (options: PackagingOption[]) => {
-    if (!aiSettings.openaiKey) return showToast(lang === "fr" ? "Ajoutez votre clé OpenAI dans le Profil de chaîne." : "Add your OpenAI key in Channel profile.", "warning");
+    if (!integrations.openai.configured) return showToast(lang === "fr" ? "Ajoutez votre clé OpenAI dans le Profil de chaîne." : "Add your OpenAI key in Channel profile.", "warning");
     setLoading("images");
     try {
       const generated = await Promise.all(options.map(async option => {
@@ -901,7 +912,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
         const concept = option.concepts[conceptIndex];
         const response = await fetch("/api/openai-image", {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ apiKey: aiSettings.openaiKey, model: aiSettings.imageModel, quality: aiSettings.imageQuality, prompt: concept.prompt, overlay: option.overlay, channel: profile.channel, systemPrompt: profile.thumbnailSystemPrompt, referenceKeys: referenceThumbnails.map(reference => reference.key) }),
+          body: JSON.stringify({ model: aiSettings.imageModel, quality: aiSettings.imageQuality, prompt: concept.prompt, overlay: option.overlay, channel: profile.channel, systemPrompt: profile.thumbnailSystemPrompt, referenceKeys: referenceThumbnails.map(reference => reference.key) }),
         });
         const data = await response.json() as { image?: string; error?: string; detail?: string };
         if (!response.ok || !data.image) throw new Error(data.detail || data.error || `image_${option.id}_failed`);
@@ -941,7 +952,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
   </div> : <div className="express-page">
     <div className="express-hero"><div><span className="eyebrow">{lang === "fr" ? "VIDÉO DÉJÀ TOURNÉE" : "VIDEO ALREADY RECORDED"}</span><h1>{lang === "fr" ? "Du contenu au clic." : "From content to click."}</h1><p>{lang === "fr" ? "Collez votre script ou votre description. Le modèle OpenRouter choisi prépare le packaging, puis OpenAI génère les vraies miniatures." : "Paste your script or description. Your chosen OpenRouter model prepares the packaging, then OpenAI generates real thumbnails."}</p></div><div className="express-orbit"><span>3×3</span><small>{lang === "fr" ? "titres × concepts" : "titles × concepts"}</small></div></div>
     <section className="express-input-card">
-      <div className={`ai-ready-strip ${configured && aiSettings.openaiKey ? "ready" : ""}`}><span>{configured && aiSettings.openaiKey ? "✓" : "!"}</span><div><strong>{configured && aiSettings.openaiKey ? (lang === "fr" ? "IA configurée" : "AI configured") : (lang === "fr" ? "Configuration IA requise" : "AI setup required")}</strong><small>{configured ? aiSettings.openrouterModel : (lang === "fr" ? "Clé OpenRouter + modèle requis" : "OpenRouter key + model required")} · {aiSettings.openaiKey ? aiSettings.imageModel : (lang === "fr" ? "clé OpenAI manquante" : "OpenAI key missing")} · {aiSettings.rememberKeys ? (lang === "fr" ? "clés mémorisées sur cet appareil" : "keys remembered on this device") : (lang === "fr" ? "session uniquement" : "session only")}</small></div><button onClick={openAiSettings}>{lang === "fr" ? "Configurer" : "Configure"}</button></div>
+      <div className={`ai-ready-strip ${configured && integrations.openai.configured ? "ready" : ""}`}><span>{configured && integrations.openai.configured ? "✓" : "!"}</span><div><strong>{configured && integrations.openai.configured ? (lang === "fr" ? "IA configurée" : "AI configured") : (lang === "fr" ? "Configuration IA requise" : "AI setup required")}</strong><small>{configured ? aiSettings.openrouterModel : (lang === "fr" ? "Clé OpenRouter + modèle requis" : "OpenRouter key + model required")} · {integrations.openai.configured ? aiSettings.imageModel : (lang === "fr" ? "clé OpenAI manquante" : "OpenAI key missing")} · {lang === "fr" ? "clés chiffrées côté serveur" : "keys encrypted server-side"}</small></div><button onClick={openAiSettings}>{lang === "fr" ? "Configurer" : "Configure"}</button></div>
       <div className={`vidiq-requirement ${profile.vidiqConnected ? "connected" : ""}`}><span>{profile.vidiqConnected ? "✓" : "!"}</span><div><strong>{profile.vidiqConnected ? (lang === "fr" ? "Compte vidIQ connecté" : "vidIQ account connected") : (lang === "fr" ? "Connexion vidIQ requise" : "vidIQ connection required")}</strong><small>{lang === "fr" ? "Les scores seront repris tels quels depuis vidIQ — jamais estimés." : "Scores are reported exactly as returned by vidIQ — never estimated."}</small></div></div>
       <div className="source-toggle"><button className={value.inputType === "script" ? "active" : ""} onClick={() => update({ inputType: "script", generated: false })}>▤ {lang === "fr" ? "J’ai le script" : "I have the script"}<small>{lang === "fr" ? "Inclut 5 quiz" : "Includes 5 quizzes"}</small></button><button className={value.inputType === "description" ? "active" : ""} onClick={() => update({ inputType: "description", generated: false })}>≡ {lang === "fr" ? "J’ai la description" : "I have the description"}<small>{lang === "fr" ? "Packaging uniquement" : "Packaging only"}</small></button></div>
       <label><span>{lang === "fr" ? "Sujet de la vidéo (facultatif)" : "Video topic (optional)"}</span><input value={value.subject} onChange={event => update({ subject: event.target.value, generated: false })} placeholder={lang === "fr" ? "Le système le déduira du contenu si ce champ est vide" : "The system will infer it from the content if left blank"} /></label>
@@ -980,7 +991,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
       <div className={`english-winner ${bestScoredOption ? "ready" : "pending"}`}><div className="english-winner-head"><div><span>EN</span><div><strong>{lang === "fr" ? "Meilleur packaging en anglais" : "Top-scoring packaging in English"}</strong><small>{bestScoredOption ? `OPTION ${bestScoredOption.id} · ${value.vidiqScores?.[bestScoredOption.id]}/100 vidIQ` : (lang === "fr" ? "Disponible après la synchronisation vidIQ" : "Available after vidIQ synchronization")}</small></div></div>{bestScoredOption && <button onClick={() => copy(`${bestScoredOption.englishTitle ?? bestScoredOption.title}\n\n${bestScoredOption.englishDescription ?? bestScoredOption.description}`)}>⧉ {lang === "fr" ? "Copier l’ensemble" : "Copy all"}</button>}</div>{bestScoredOption ? <div className="english-winner-copy"><article><small>ENGLISH TITLE</small><h3>{bestScoredOption.englishTitle ?? bestScoredOption.title}</h3><button onClick={() => copy(bestScoredOption.englishTitle ?? bestScoredOption.title)}>⧉</button></article><article><small>ENGLISH DESCRIPTION</small><p>{bestScoredOption.englishDescription ?? bestScoredOption.description}</p><button onClick={() => copy(bestScoredOption.englishDescription ?? bestScoredOption.description)}>⧉</button></article></div> : <p>{lang === "fr" ? "Cliquez sur « Synchroniser les scores vidIQ » : la traduction anglaise de l’option gagnante apparaîtra ici." : "Click “Sync vidIQ scores” to display the English version of the winning option here."}</p>}</div>
       {(referenceThumbnails.length > 0 || profile.thumbnailSystemPrompt) && <div className="visual-dna-active">◆ {lang === "fr" ? "ADN visuel actif" : "Visual DNA active"} · {referenceThumbnails.length} {lang === "fr" ? "référence(s)" : "reference(s)"} · {profile.thumbnailSystemPrompt ? (lang === "fr" ? "prompt système appliqué" : "system prompt applied") : (lang === "fr" ? "prompt système à générer" : "system prompt pending")}</div>}
       <button className="primary thumbnail-cta" onClick={() => generateThumbnails(pack.options)} disabled={loading !== null}>✦ {loading === "images" ? (lang === "fr" ? "OpenAI génère 3 images…" : "OpenAI is generating 3 images…") : (lang === "fr" ? "Générer les 3 vraies miniatures" : "Generate 3 real thumbnails")}</button>
-      {!aiSettings.openaiKey && <button className="inline-config" onClick={openAiSettings}>{lang === "fr" ? "Ajouter la clé OpenAI" : "Add OpenAI key"} →</button>}
+      {!integrations.openai.configured && <button className="inline-config" onClick={openAiSettings}>{lang === "fr" ? "Ajouter la clé OpenAI" : "Add OpenAI key"} →</button>}
     </section>
     {value.thumbnailsGenerated && Object.keys(images).length === 3 && <section className="express-section generated-thumbnails"><div className="express-section-title"><span>02</span><div><h2>{lang === "fr" ? "Miniatures générées par OpenAI" : "OpenAI-generated thumbnails"}</h2><p>{lang === "fr" ? "Téléchargez chaque PNG recadré automatiquement en 1280 × 720." : "Download each PNG automatically cropped to 1280 × 720."}</p></div></div><div className="thumbnail-grid">{pack.options.map(option => <figure key={option.id} className="thumbnail-preview real-thumbnail"><img src={images[option.id]} alt={`${lang === "fr" ? "Miniature" : "Thumbnail"} ${option.id}: ${option.title}`} /><button className="thumbnail-zoom" aria-label={lang === "fr" ? `Agrandir la miniature ${option.id}` : `Enlarge thumbnail ${option.id}`} onClick={() => setPreview({ id: option.id, src: images[option.id], title: option.overlay, caption: option.concepts[value.selected[option.id] ?? 0].name })} /><figcaption><strong>{option.overlay}</strong><span>{option.concepts[value.selected[option.id] ?? 0].name}</span></figcaption><button className="thumbnail-download" onClick={() => downloadThumbnail(images[option.id], option.id)}>↓ PNG · 1280 × 720</button></figure>)}</div></section>}
     <section className="express-section"><div className="express-section-title"><span>{value.thumbnailsGenerated ? "03" : "02"}</span><div><h2>{lang === "fr" ? "Description, tags & commentaire épinglé" : "Description, tags & pinned comment"}</h2><p>{lang === "fr" ? "Générés par le modèle sélectionné et prêts à copier." : "Generated by the selected model and ready to copy."}</p></div></div><div className="delivery-grid"><div className="delivery-card"><div><strong>{lang === "fr" ? "DESCRIPTION AMÉLIORÉE" : "IMPROVED DESCRIPTION"}</strong><button onClick={() => copy(pack.improvedDescription)}>⧉ {lang === "fr" ? "Copier" : "Copy"}</button></div><pre>{pack.improvedDescription}</pre></div><div className="delivery-card tags-card"><div><strong>TAGS</strong><button onClick={() => copy(pack.tags.join(", "))}>⧉ {lang === "fr" ? "Copier tout" : "Copy all"}</button></div><div>{pack.tags.map(tag => <span key={tag}>{tag}</span>)}</div></div></div><div className="pinned-comment-card"><div><span>📌</span><div><strong>{lang === "fr" ? "COMMENTAIRE À ÉPINGLER" : "PINNED COMMENT"}</strong><small>{lang === "fr" ? "Une relance naturelle pour engager la discussion sous la vidéo." : "A natural prompt to start a conversation below the video."}</small></div><button onClick={() => copy(pack.pinnedComment ?? "")} disabled={!pack.pinnedComment}>⧉ {lang === "fr" ? "Copier" : "Copy"}</button></div><p>{pack.pinnedComment ?? (lang === "fr" ? "Régénérez le packaging pour créer le commentaire épinglé." : "Regenerate the packaging to create the pinned comment.")}</p></div></section>
@@ -1101,9 +1112,9 @@ function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, x: number, 
   if (line) ctx.fillText(line.trim(), x, currentY);
 }
 
-function StudioPackaging({ project, profile, updateProject, lang, t, copy, showToast, aiSettings, referenceThumbnails, openAiSettings, script }: {
+function StudioPackaging({ project, profile, updateProject, lang, t, copy, showToast, aiSettings, integrations, referenceThumbnails, openAiSettings, script }: {
   project: Project; profile: Profile; updateProject: (p: Partial<Project>) => void; lang: Lang; t: (typeof labels)[Lang];
-  copy: (v: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiSettings: AiSettings;
+  copy: (v: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiSettings: AiSettings; integrations: Integrations;
   referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void; script: string;
 }) {
   const a = project.packageAnswers;
@@ -1132,7 +1143,7 @@ function StudioPackaging({ project, profile, updateProject, lang, t, copy, showT
           <Question n="3" label={lang === "fr" ? "Concept visuel retenu" : "Chosen visual concept"} optional={lang === "fr" ? "optionnel" : "optional"} help={lang === "fr" ? "Laissez vide pour choisir parmi les concepts proposés par l’IA" : "Leave empty to choose from the concepts proposed by AI"} value={a.visual} set={v => setAnswer("visual", v)} placeholder={lang === "fr" ? "Ex. visage surpris à gauche, téléphone à droite" : "E.g. surprised face left, phone right"} />
         </div></>
       : <><div className="ab-note">ⓘ {lang === "fr" ? "YouTube ne teste qu’une variable à la fois : titres OU miniatures." : "YouTube tests one variable at a time: titles OR thumbnails."}</div>
-        <ExpressPackagingAI value={packagingValue} setValue={setPackagingValue} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={openAiSettings} autoStart={complete} embedded />
+        <ExpressPackagingAI value={packagingValue} setValue={setPackagingValue} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} openAiSettings={openAiSettings} autoStart={complete} embedded />
         <div className="publish-section"><h3>{lang === "fr" ? "Checklist de publication" : "Publishing checklist"}</h3>{["Titre", "Description & liens", "Miniature à 120 px", "Chapitres", "Sous-titres", "Commentaire épinglé", "Test A/B", "CTR à 24–48 h"].map(x => <label key={x}><input type="checkbox" />{x}</label>)}</div></>}
   </>;
 }
@@ -1162,9 +1173,9 @@ async function optimizeReferenceImage(file: File) {
   } catch { return file; }
 }
 
-function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, openRouterModels, referenceThumbnails, reloadReferences, showToast, done }: {
+function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, integrations, refreshIntegrations, legacyKeysFound, clearLegacyKeys, openRouterModels, referenceThumbnails, reloadReferences, showToast, done }: {
   profile: Profile; setProfile: (p: Profile) => void; lang: Lang; t: (typeof labels)[Lang];
-  aiSettings: AiSettings; setAiSettings: (settings: AiSettings) => void; openRouterModels: OpenRouterModel[];
+  aiSettings: AiSettings; setAiSettings: (settings: AiSettings) => void; integrations: Integrations; refreshIntegrations: () => void; legacyKeysFound: boolean; clearLegacyKeys: () => void; openRouterModels: OpenRouterModel[];
   referenceThumbnails: ReferenceThumbnail[]; reloadReferences: () => void; showToast: (message: string, kind?: AlertKind) => void; done: () => void;
 }) {
   const field = (key: keyof Profile, value: string | boolean) => setProfile({ ...profile, [key]: value });
@@ -1176,23 +1187,43 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
   const [styleLoading, setStyleLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [iteration, setIteration] = useState("");
-  const [openRouterKeyStatus, setOpenRouterKeyStatus] = useState<"idle" | "loading" | "valid" | "invalid">("idle");
-  const [openRouterKeyLabel, setOpenRouterKeyLabel] = useState("");
-  const validateOpenRouterKey = async () => {
-    if (!aiSettings.openrouterKey.trim()) return showToast(lang === "fr" ? "Ajoutez d’abord une clé OpenRouter." : "Add an OpenRouter key first.", "warning");
-    setOpenRouterKeyStatus("loading");
+  const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
+  const [secretBusy, setSecretBusy] = useState<IntegrationService | null>(null);
+  const serviceLabels: Record<IntegrationService, { name: string; use: string }> = {
+    openrouter: { name: "OpenRouter", use: lang === "fr" ? "Scripts longs, titres, descriptions, tags, prompts et quiz" : "Long scripts, titles, descriptions, tags, prompts, and quizzes" },
+    openai: { name: "OpenAI Images", use: lang === "fr" ? "Génération réelle des miniatures" : "Real thumbnail generation" },
+    descript: { name: "Descript", use: lang === "fr" ? "Projets, transcriptions et compositions vidéo" : "Projects, transcripts, and video compositions" },
+  };
+  // The key is validated upstream before it is stored, so a typo never reaches a paid pipeline.
+  const saveSecret = async (service: IntegrationService) => {
+    const value = (secretDrafts[service] ?? "").trim();
+    if (!value) return showToast(lang === "fr" ? "Saisissez d’abord une clé." : "Enter a key first.", "warning");
+    setSecretBusy(service);
     try {
-      const response = await fetch("/api/openrouter-key", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey: aiSettings.openrouterKey }) });
-      const data = await response.json() as { valid?: boolean; label?: string; error?: string };
-      if (!response.ok || !data.valid) throw new Error(data.error || "key_rejected");
-      setOpenRouterKeyStatus("valid");
-      setOpenRouterKeyLabel(data.label ?? "OpenRouter");
-      showToast(lang === "fr" ? "Clé OpenRouter valide" : "OpenRouter key is valid");
+      const response = await postJsonWithRetry("/api/integrations", { service, value });
+      const data = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !data.ok) throw new Error(data.error || "secret_rejected");
+      setSecretDrafts(current => ({ ...current, [service]: "" }));
+      refreshIntegrations();
+      clearLegacyKeys();
+      showToast(lang === "fr" ? `Clé ${serviceLabels[service].name} testée et enregistrée` : `${serviceLabels[service].name} key tested and saved`);
+    } catch (error) {
+      const reason = error instanceof TypeError ? connectionLostMessage(lang) : error instanceof Error && error.message === "secret_rejected"
+        ? (lang === "fr" ? "Le fournisseur a refusé cette clé." : "The provider rejected this key.")
+        : (lang === "fr" ? "Enregistrement impossible." : "Could not save the key.");
+      showToast(reason, "error");
+    } finally { setSecretBusy(null); }
+  };
+  const removeSecret = async (service: IntegrationService) => {
+    setSecretBusy(service);
+    try {
+      const response = await fetch(`/api/integrations?service=${service}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("delete_failed");
+      refreshIntegrations();
+      showToast(lang === "fr" ? `Clé ${serviceLabels[service].name} supprimée` : `${serviceLabels[service].name} key removed`);
     } catch {
-      setOpenRouterKeyStatus("invalid");
-      setOpenRouterKeyLabel("");
-      showToast(lang === "fr" ? "OpenRouter refuse cette clé. Vérifiez-la ou créez-en une nouvelle." : "OpenRouter rejected this key. Check it or create a new one.", "error");
-    }
+      showToast(lang === "fr" ? "Suppression impossible." : "Could not remove the key.", "error");
+    } finally { setSecretBusy(null); }
   };
   const uploadReferences = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -1215,11 +1246,11 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
     if (response.ok) { reloadReferences(); showToast(lang === "fr" ? "Référence supprimée" : "Reference removed"); }
   };
   const generateEditorialPrompt = async (iterate = false) => {
-    if (!aiSettings.openrouterKey || !aiSettings.visionModel) return showToast(lang === "fr" ? "Ajoutez la clé OpenRouter et choisissez un modèle vision." : "Add an OpenRouter key and choose a vision model.", "warning");
+    if (!integrations.openrouter.configured || !aiSettings.visionModel) return showToast(lang === "fr" ? "Ajoutez la clé OpenRouter et choisissez un modèle vision." : "Add an OpenRouter key and choose a vision model.", "warning");
     if (!referenceThumbnails.length) return showToast(lang === "fr" ? "Ajoutez d’abord une miniature de référence." : "Add a reference thumbnail first.", "warning");
     setStyleLoading(true);
     try {
-      const response = await fetch("/api/reference-style", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.visionModel, referenceKeys: referenceThumbnails.map(reference => reference.key), currentPrompt: iterate ? profile.thumbnailSystemPrompt : "", instruction: iterate ? iteration : "", language: lang, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone } }) });
+      const response = await fetch("/api/reference-style", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: aiSettings.visionModel, referenceKeys: referenceThumbnails.map(reference => reference.key), currentPrompt: iterate ? profile.thumbnailSystemPrompt : "", instruction: iterate ? iteration : "", language: lang, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone } }) });
       const data = await response.json() as { prompt?: string; error?: string; detail?: string };
       if (!response.ok || !data.prompt) throw new Error(data.detail || data.error || "analysis_failed");
       field("thumbnailSystemPrompt", data.prompt);
@@ -1229,19 +1260,34 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
     finally { setStyleLoading(false); }
   };
   return <div className="page-view profile-page"><div className="page-title"><div><span className="eyebrow">{lang === "fr" ? "PERSONNALISATION & IA" : "PERSONALIZATION & AI"}</span><h1>{t.channelProfile}</h1><p>{lang === "fr" ? "Configurez les modèles utilisés pour les scripts longs, le packaging et les miniatures." : "Configure the models used for long-form scripts, packaging, and thumbnails."}</p></div><button className="primary" onClick={done}>{t.saveProfile}</button></div>
-    <section className="form-section ai-settings-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Clés IA & modèles" : "AI keys & models"}</h2><p>{lang === "fr" ? "Les prix OpenRouter sont récupérés en direct et affichés par million de jetons." : "OpenRouter prices are fetched live and shown per million tokens."}</p></div><span className={`session-badge ${aiSettings.rememberKeys ? "remembered" : ""}`}>⌕ {aiSettings.rememberKeys ? (lang === "fr" ? "MÉMORISÉ SUR CET APPAREIL" : "REMEMBERED ON THIS DEVICE") : (lang === "fr" ? "SESSION UNIQUEMENT" : "SESSION ONLY")}</span></div>
+    <section className="form-section ai-settings-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Clés & connexions" : "Keys & connections"}</h2><p>{lang === "fr" ? "Chaque clé est testée auprès du fournisseur avant d’être enregistrée, puis chiffrée côté serveur." : "Every key is tested against the provider before being stored, then encrypted server-side."}</p></div><span className="session-badge remembered">⌕ {lang === "fr" ? "CHIFFRÉ · LIÉ À VOTRE COMPTE" : "ENCRYPTED · TIED TO YOUR ACCOUNT"}</span></div>
+      {legacyKeysFound && <div className="legacy-keys-banner"><span>!</span><div><strong>{lang === "fr" ? "Vos clés étaient enregistrées dans ce navigateur" : "Your keys were stored in this browser"}</strong><p>{lang === "fr" ? "Elles sont désormais chiffrées côté serveur et liées à votre compte. Ressaisissez-les une fois ci-dessous — nous ne les téléversons jamais à votre place." : "They are now encrypted server-side and tied to your account. Enter them once below — we never upload them on your behalf."}</p></div><button type="button" onClick={clearLegacyKeys}>{lang === "fr" ? "Effacer de ce navigateur" : "Clear from this browser"}</button></div>}
       <div className="credential-grid">
-        <div className="credential-card"><span className="provider-mark openrouter-mark">OR</span><strong>OpenRouter</strong><small>{lang === "fr" ? "Scripts longs, titres, descriptions, tags, prompts et quiz" : "Long scripts, titles, descriptions, tags, prompts, and quizzes"}</small><label className="field-label" htmlFor="openrouter-api-key">API KEY</label><input id="openrouter-api-key" type="password" autoComplete="off" spellCheck={false} value={aiSettings.openrouterKey} onChange={event => { setAiSettings({ ...aiSettings, openrouterKey: event.target.value }); setOpenRouterKeyStatus("idle"); }} placeholder="sk-or-v1-••••••••" /><div className="credential-status-row"><em className={openRouterKeyStatus === "invalid" ? "invalid" : aiSettings.openrouterKey ? "present" : ""}>● {openRouterKeyStatus === "valid" ? `${lang === "fr" ? "Clé valide" : "Valid key"}${openRouterKeyLabel ? ` · ${openRouterKeyLabel}` : ""}` : openRouterKeyStatus === "invalid" ? (lang === "fr" ? "Clé refusée par OpenRouter" : "Key rejected by OpenRouter") : aiSettings.openrouterKey ? (lang === "fr" ? "Clé saisie — test recommandé" : "Key entered — test recommended") : (lang === "fr" ? "Clé requise" : "Key required")}</em><button type="button" onClick={validateOpenRouterKey} disabled={openRouterKeyStatus === "loading" || !aiSettings.openrouterKey.trim()}>{openRouterKeyStatus === "loading" ? (lang === "fr" ? "Test…" : "Testing…") : (lang === "fr" ? "Tester la clé" : "Test key")}</button></div></div>
-        <label className="credential-card"><span className="provider-mark openai-mark">AI</span><strong>OpenAI Images</strong><small>{lang === "fr" ? "Génération réelle des miniatures PNG" : "Real PNG thumbnail generation"}</small><span className="field-label">API KEY</span><input type="password" autoComplete="off" spellCheck={false} value={aiSettings.openaiKey} onChange={event => setAiSettings({ ...aiSettings, openaiKey: event.target.value })} placeholder="sk-proj-••••••••" /><em className={aiSettings.openaiKey ? "present" : ""}>● {aiSettings.openaiKey ? (lang === "fr" ? "Clé présente en mémoire" : "Key held in memory") : (lang === "fr" ? "Clé requise pour les images" : "Key required for images")}</em></label>
+        {(["openrouter", "openai", "descript"] as IntegrationService[]).map(service => {
+          const state = integrations[service];
+          const busy = secretBusy === service;
+          return <div className="credential-card" key={service}>
+            <span className={`provider-mark ${service}-mark`}>{service === "openrouter" ? "OR" : service === "openai" ? "AI" : "DS"}</span>
+            <strong>{serviceLabels[service].name}</strong><small>{serviceLabels[service].use}</small>
+            <label className="field-label" htmlFor={`secret-${service}`}>API KEY</label>
+            <input id={`secret-${service}`} type="password" autoComplete="off" spellCheck={false} value={secretDrafts[service] ?? ""} onChange={event => setSecretDrafts(current => ({ ...current, [service]: event.target.value }))} placeholder={state.configured ? `•••• ${state.last4}` : service === "openrouter" ? "sk-or-v1-••••••••" : "sk-••••••••"} />
+            <div className="credential-status-row">
+              <em className={state.configured ? "present" : ""}>● {state.configured
+                ? `${lang === "fr" ? "Configurée" : "Configured"}${state.last4 ? ` · ••••${state.last4}` : ""}${state.source === "environment" ? (lang === "fr" ? " · serveur" : " · server") : ""}`
+                : (lang === "fr" ? "Clé requise" : "Key required")}</em>
+              <button type="button" onClick={() => saveSecret(service)} disabled={busy || !(secretDrafts[service] ?? "").trim()}>{busy ? (lang === "fr" ? "Test…" : "Testing…") : (lang === "fr" ? "Tester et enregistrer" : "Test and save")}</button>
+              {state.configured && state.source === "user" && <button type="button" className="danger" onClick={() => removeSecret(service)} disabled={busy}>{lang === "fr" ? "Supprimer" : "Remove"}</button>}
+            </div>
+          </div>;
+        })}
       </div>
-      <label className="remember-keys"><input type="checkbox" checked={aiSettings.rememberKeys} onChange={event => setAiSettings({ ...aiSettings, rememberKeys: event.target.checked })} /><span><strong>{lang === "fr" ? "Mémoriser mes clés sur cet appareil" : "Remember my keys on this device"}</strong><small>{lang === "fr" ? "Vous ne devrez plus les ressaisir après une actualisation. À activer uniquement sur votre appareil personnel." : "You will not need to enter them after a refresh. Enable only on your personal device."}</small></span></label>
       <div className="model-grid">
         <label className="writer-model-field"><span>{lang === "fr" ? "Scénarisation longue — modèle thinking" : "Long-form writing — thinking model"}</span><select value={aiSettings.writerModel} onChange={event => setAiSettings({ ...aiSettings, writerModel: event.target.value })}><option value="">{writerModels.length ? (lang === "fr" ? "Choisir un modèle puissant" : "Choose a powerful model") : (lang === "fr" ? "Aucun modèle thinking compatible" : "No compatible thinking model")}</option>{writerModels.map(model => <option key={model.id} value={model.id}>{model.id === "openai/gpt-5.6-sol" ? "★ " : ""}{model.name} · in {formatTokenPrice(model.inputPerToken)}/M · out {formatTokenPrice(model.outputPerToken)}/M</option>)}</select>{selectedWriterModel && <small><strong>{selectedWriterModel.id === "openai/gpt-5.6-sol" ? (lang === "fr" ? "Recommandé pour les scripts longs" : "Recommended for long-form scripts") : (lang === "fr" ? "Compatible scripts longs" : "Long-form compatible")}</strong> · {selectedWriterModel.contextLength ? `${Math.round(selectedWriterModel.contextLength / 1000)}k context` : "context n/a"} · {lang === "fr" ? "réflexion élevée activée automatiquement" : "high reasoning enabled automatically"}</small>}<em>{lang === "fr" ? "La réflexion consomme des jetons de sortie : le coût final dépend du raisonnement et de la longueur du script." : "Reasoning uses output tokens: final cost depends on thinking and script length."}</em></label>
         <label><span>{lang === "fr" ? "Modèle OpenRouter — packaging et hook" : "OpenRouter model — packaging and hook"}</span><select value={aiSettings.openrouterModel} onChange={event => setAiSettings({ ...aiSettings, openrouterModel: event.target.value })}><option value="">{openRouterModels.length ? (lang === "fr" ? "Choisir un modèle" : "Choose a model") : (lang === "fr" ? "Chargement du catalogue…" : "Loading catalog…")}</option>{openRouterModels.map(model => <option key={model.id} value={model.id}>{model.name} · in {formatTokenPrice(model.inputPerToken)}/M · out {formatTokenPrice(model.outputPerToken)}/M</option>)}</select>{selectedModel && <small>{selectedModel.id} · {selectedModel.contextLength ? `${Math.round(selectedModel.contextLength / 1000)}k context` : "context n/a"} · {lang === "fr" ? "tarifs OpenRouter en direct" : "live OpenRouter pricing"}</small>}</label>
         <label><span>{lang === "fr" ? "Modèle d’image OpenAI" : "OpenAI image model"}</span><select value={aiSettings.imageModel} onChange={event => setAiSettings({ ...aiSettings, imageModel: event.target.value as AiSettings["imageModel"] })}><option value="gpt-image-2">GPT Image 2 · texte in $5/M · image in $8/M · out $30/M</option><option value="gpt-image-1.5">GPT Image 1.5 (ancien) · texte in $5/M · image in $8/M · out $32/M</option></select><small>{lang === "fr" ? "GPT Image 2 est recommandé pour les nouvelles miniatures." : "GPT Image 2 is recommended for new thumbnails."}</small></label>
         <label><span>{lang === "fr" ? "Qualité de génération" : "Generation quality"}</span><select value={aiSettings.imageQuality} onChange={event => setAiSettings({ ...aiSettings, imageQuality: event.target.value as AiSettings["imageQuality"] })}><option value="low">Low · {lang === "fr" ? "économique" : "economy"}</option><option value="medium">Medium · {lang === "fr" ? "recommandé" : "recommended"}</option><option value="high">High · {lang === "fr" ? "qualité maximale" : "maximum quality"}</option></select><small>{lang === "fr" ? "Le coût réel dépend aussi de la résolution et du nombre de jetons image." : "Actual cost also depends on resolution and image-token usage."}</small></label>
       </div>
-      <p className="privacy-note strong-privacy">⌕ {aiSettings.rememberKeys ? (lang === "fr" ? "Vos clés sont enregistrées uniquement dans le stockage local de ce navigateur. Elles ne sont jamais ajoutées aux projets ni à la base du site. Décochez l’option pour les effacer de cet appareil." : "Your keys are stored only in this browser's local storage. They are never added to projects or the site's database. Turn the option off to remove them from this device.") : (lang === "fr" ? "Vos clés restent uniquement en mémoire pendant cette session et disparaissent au rechargement." : "Your keys remain in memory only for this session and disappear on reload.")}</p>
+      <p className="privacy-note strong-privacy">⌕ {lang === "fr" ? "Vos clés sont chiffrées (AES-GCM) côté serveur et liées à votre compte. Elles ne sont jamais renvoyées au navigateur ni ajoutées aux projets : seuls les quatre derniers caractères sont affichés. Supprimez-les à tout moment depuis cet écran." : "Your keys are encrypted (AES-GCM) server-side and tied to your account. They are never returned to the browser or added to projects: only the last four characters are shown. Remove them at any time from this screen."}</p>
     </section>
     <section className="form-section visual-style-section"><div className="section-heading"><div><h2>{lang === "fr" ? "ADN visuel des miniatures" : "Thumbnail visual DNA"}</h2><p>{lang === "fr" ? "Ajoutez jusqu’à 4 références. L’IA en extrait des règles éditoriales réutilisables sans copier une miniature précise." : "Add up to 4 references. AI extracts reusable editorial rules without copying a specific thumbnail."}</p></div><span className="reference-count">{referenceThumbnails.length}/4 {lang === "fr" ? "RÉFÉRENCES" : "REFERENCES"}</span></div>
       <div className="reference-grid">{referenceThumbnails.map(reference => <figure key={reference.key} className="reference-card"><img src={reference.url} alt={reference.name} /><figcaption title={reference.name}>{reference.name}</figcaption><button onClick={() => deleteReference(reference)} aria-label={`${lang === "fr" ? "Supprimer" : "Remove"} ${reference.name}`}>×</button></figure>)}{referenceThumbnails.length < 4 && <label className="reference-upload"><input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={event => { uploadReferences(event.target.files); event.target.value = ""; }} /><span>＋</span><strong>{uploading ? (lang === "fr" ? "Import…" : "Uploading…") : (lang === "fr" ? "Ajouter des références" : "Add references")}</strong><small>PNG, JPG ou WebP · 4 max.</small></label>}</div>
