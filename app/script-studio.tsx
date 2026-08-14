@@ -8,7 +8,8 @@ type View = "studio" | "express" | "projects" | "profile";
 type StepState = "done" | "active" | "todo";
 type HookIterationTarget = "hook" | "promise" | "both";
 type NoticeKind = "warning" | "error";
-type ToastState = { message: string; kind: "success" | NoticeKind };
+type AlertKind = "success" | NoticeKind;
+type AlertItem = { id: string; message: string; kind: AlertKind; count: number; auto: boolean };
 
 type Profile = {
   channel: string; theme: string; primary: string; secondary: string; audience: string;
@@ -22,11 +23,18 @@ type Chapter = {
   id: string; title: string; objective: string; keyPoints: string[]; targetWords: number;
 };
 
+type BodySection = { id: string; script: string; transition: string };
+
 type Project = {
   id: string; title: string; subject: string; status: string; updated: string; step: number;
   confirmed: boolean; completed: number[]; hook: string; promise: string; body: string;
   conclusion: string; reviewAccepted: boolean; hookGeneratedByAi?: boolean; packageAnswers: { visual: string; timecodes: string; links: string };
   workflowVersion: 2; chapters: Chapter[]; bodyWordTarget: number; bodyGeneratedByAi?: boolean; bodyModel?: string;
+  // Completed-chapter prefix of an interrupted body generation; lets a retry resume
+  // instead of regenerating paid chapters. Cleared on success and on any invalidation.
+  bodySections?: BodySection[];
+  // Step 7 packaging, persisted so revisiting the step never re-runs a paid generation.
+  packaging?: ExpressState;
 };
 
 type ThumbnailConcept = { name: string; prompt: string };
@@ -108,8 +116,42 @@ const labels = {
 
 function wordCount(value: string) { return value.trim() ? value.trim().split(/\s+/).length : 0; }
 
+// Up to two automatic retries (1.5 s then 4 s) on retryable statuses or a network
+// failure. Client-side on purpose: each attempt opens a fresh HTTP request instead of
+// stretching one long one.
+const RETRYABLE_STATUS = [408, 429, 500, 502, 503, 504];
+const RETRY_DELAYS = [1_500, 4_000];
+async function postJsonWithRetry(url: string, payload: unknown, onRetry?: () => void): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+      if (attempt < RETRY_DELAYS.length && RETRYABLE_STATUS.includes(response.status)) { onRetry?.(); await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[attempt])); continue; }
+      return response;
+    } catch (error) {
+      if (attempt >= RETRY_DELAYS.length) throw error;
+      onRetry?.(); await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[attempt]));
+    }
+  }
+}
+
+// fetch() rejects with a TypeError when the server itself is unreachable (dev server
+// stopped, network drop). Surface that as guidance instead of a raw "Failed to fetch".
+function connectionLostMessage(lang: Lang) {
+  return lang === "fr"
+    ? "La connexion au serveur a été interrompue. Vérifiez que l’application est bien lancée et votre réseau, puis réessayez."
+    : "The connection to the server was interrupted. Check that the app is still running and your network, then retry.";
+}
+
+// Must stay byte-identical to the format the monolithic route produced: step 6 checks
+// body.includes(`CHAPITRE ${n}`) and estimatedTimecodes splits on /CHAPITRE\s+\d+/i.
+function assembleBody(sections: BodySection[], chapters: Chapter[]) {
+  return sections.map((section, index) => `CHAPITRE ${index + 1} — ${chapters[index].title.toUpperCase()}\n\n${section.script.trim()}${section.transition.trim() ? `\n\n${section.transition.trim()}` : ""}`).join("\n\n");
+}
+
 const WORDS_PER_MINUTE = 145;
 const CONCLUSION_WORD_RESERVE = 90;
+const ALERT_DISMISS_DELAY = 4000;
+const ALERT_VISIBLE_LIMIT = 4;
 
 function clamp(value: number, minimum: number, maximum: number) { return Math.min(maximum, Math.max(minimum, Math.round(value))); }
 
@@ -137,6 +179,31 @@ function scriptPlan(profile: Profile, project: Pick<Project, "hook" | "promise" 
     chapterCount: clamp(duration.midpoint / 1.4, 5, 12),
     estimatedMinutes: projectedWords / WORDS_PER_MINUTE,
   };
+}
+
+function formatTimecode(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// Same rate scriptPlan uses for estimatedMinutes, so the chapter marks line up with the
+// "X mots · environ Y minutes" figure shown in step 6.
+function estimatedTimecodes(project: Pick<Project, "hook" | "promise" | "body" | "chapters">, profile: Profile) {
+  if (!project.body.trim()) return "";
+  const segments = project.body.split(/CHAPITRE\s+\d+/i);
+  const chapterBodies = segments.slice(1);
+  if (!chapterBodies.length) return "";
+  const secondsPerWord = 60 / WORDS_PER_MINUTE;
+  const spoken = (value: string) => wordCount(value) * secondsPerWord;
+  // Everything spoken before chapter 1: hook, fixed presentation, promise, fixed launch,
+  // then whatever the body says ahead of its first CHAPITRE marker.
+  let cursor = spoken(project.hook) + spoken(profile.presentation) + spoken(project.promise) + spoken(profile.launch) + spoken(segments[0]);
+  const lines = [`${formatTimecode(0)} Intro`];
+  chapterBodies.forEach((chapterBody, index) => {
+    lines.push(`${formatTimecode(cursor)} ${project.chapters[index]?.title.trim() || `Chapitre ${index + 1}`}`);
+    cursor += spoken(chapterBody);
+  });
+  return lines.join("\n");
 }
 
 function chooseWriterModel(models: OpenRouterModel[]) {
@@ -188,6 +255,10 @@ function migrateProject(value: Partial<Project>, profile: Profile): Project {
     reviewAccepted: Boolean(value.reviewAccepted),
     hookGeneratedByAi: value.hookGeneratedByAi,
     packageAnswers: { visual: value.packageAnswers?.visual ?? "", timecodes: value.packageAnswers?.timecodes ?? "", links: value.packageAnswers?.links ?? "" },
+    packaging: value.packaging && typeof value.packaging === "object" ? value.packaging : undefined,
+    bodySections: Array.isArray(value.bodySections) && value.bodySections.length
+      ? value.bodySections.filter(section => section && typeof section.id === "string" && typeof section.script === "string" && typeof section.transition === "string").map(section => ({ id: section.id, script: section.script, transition: section.transition }))
+      : undefined,
     workflowVersion: 2,
     chapters,
     bodyWordTarget: Number.isFinite(value.bodyWordTarget) && Number(value.bodyWordTarget) > 0 ? Math.round(Number(value.bodyWordTarget)) : 0,
@@ -215,10 +286,14 @@ export default function ScriptStudio() {
   const [newOpen, setNewOpen] = useState(false);
   const [newSubject, setNewSubject] = useState("");
   const [prompter, setPrompter] = useState(false);
-  const [toast, setToast] = useState<ToastState | null>(null);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [alertsPaused, setAlertsPaused] = useState(false);
   const [studioAiLoading, setStudioAiLoading] = useState(false);
   const [studioAiNotice, setStudioAiNotice] = useState<{ projectId: string; kind: NoticeKind; message: string } | null>(null);
+  const [bodyProgress, setBodyProgress] = useState<{ current: number; total: number; title: string; retrying: boolean } | null>(null);
+  const bodyRunId = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alertTimers = useRef(new Map<string, { count: number; timer: ReturnType<typeof setTimeout> }>());
   const t = labels[lang];
   const project = projects.find(p => p.id === activeId) ?? projects[0];
   const loadReferenceThumbnails = useCallback(() => {
@@ -308,8 +383,58 @@ export default function ScriptStudio() {
     }, 700);
   }, [profile, projects, activeId, express, lang, hydrated]);
 
-  const updateProject = (patch: Partial<Project>) => setProjects(items => items.map(p => p.id === activeId ? { ...p, ...patch, updated: lang === "fr" ? "À l’instant" : "Just now" } : p));
-  const showToast = (message: string, kind: ToastState["kind"] = "success") => { setToast({ message, kind }); setTimeout(() => setToast(null), kind === "success" ? 1800 : 4200); };
+  // One timer per alert: it can only ever close its own card. Hovering or focusing the
+  // stack disarms every timer; leaving re-arms them for a full delay, not the remainder.
+  useEffect(() => {
+    const timers = alertTimers.current;
+    const disarm = (id: string) => { const entry = timers.get(id); if (entry) { clearTimeout(entry.timer); timers.delete(id); } };
+    for (const id of Array.from(timers.keys())) if (!alerts.some(alert => alert.id === id && alert.auto)) disarm(id);
+    if (alertsPaused) { for (const id of Array.from(timers.keys())) disarm(id); return; }
+    for (const alert of alerts) {
+      if (!alert.auto) continue;
+      const entry = timers.get(alert.id);
+      if (entry && entry.count === alert.count) continue;
+      disarm(alert.id);
+      timers.set(alert.id, { count: alert.count, timer: setTimeout(() => { timers.delete(alert.id); setAlerts(current => current.filter(item => item.id !== alert.id)); }, ALERT_DISMISS_DELAY) });
+    }
+  }, [alerts, alertsPaused]);
+
+  useEffect(() => {
+    const timers = alertTimers.current;
+    return () => { timers.forEach(entry => clearTimeout(entry.timer)); timers.clear(); };
+  }, []);
+
+  useEffect(() => {
+    if (!alerts.length) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setAlerts(current => current.slice(0, -1)); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [alerts.length]);
+
+  const updateProject = (patch: Partial<Project>) => {
+    // Central invalidation: every path that clears the body also cancels any in-flight
+    // section loop and drops the resumable prefix, so a stale loop can never resurrect
+    // an obsolete body over fresh inputs.
+    if (patch.body === "") {
+      bodyRunId.current += 1;
+      if (!("bodySections" in patch)) patch = { ...patch, bodySections: undefined };
+    }
+    setProjects(items => items.map(p => p.id === activeId ? { ...p, ...patch, updated: lang === "fr" ? "À l’instant" : "Just now" } : p));
+  };
+  const showToast = (message: string, kind: AlertKind = "success", options?: { persist?: boolean }) => {
+    setAlerts(current => {
+      const duplicate = current.find(alert => alert.message === message && alert.kind === kind);
+      if (duplicate) return current.map(alert => alert.id === duplicate.id ? { ...alert, count: alert.count + 1 } : alert);
+      const next = [...current, { id: crypto.randomUUID(), message, kind, count: 1, auto: kind === "success" && !options?.persist }];
+      // Over the limit, only a success can be evicted — a warning or an error always waits for a click.
+      if (next.length > ALERT_VISIBLE_LIMIT) {
+        const oldestSuccess = next.findIndex(alert => alert.kind === "success");
+        if (oldestSuccess !== -1) next.splice(oldestSuccess, 1);
+      }
+      return next;
+    });
+  };
+  const dismissAlert = (id: string) => setAlerts(current => current.filter(alert => alert.id !== id));
   const copy = async (value: string) => { await navigator.clipboard.writeText(value); showToast(lang === "fr" ? "Copié dans le presse-papiers" : "Copied to clipboard"); };
   const closingAlreadyIncluded = Boolean(profile.closing.trim() && project.conclusion.includes(profile.closing.trim()));
   const script = [project.hook, profile.presentation, project.promise, profile.launch, project.body, project.conclusion, closingAlreadyIncluded ? "" : profile.closing].filter(Boolean).join("\n\n");
@@ -327,27 +452,23 @@ export default function ScriptStudio() {
   const runHookAi = async (action: "generate" | "iterate", target: HookIterationTarget = "both", direction = "") => {
     if (studioAiLoading) return false;
     if (!aiSettings.openrouterKey || !aiSettings.openrouterModel) {
-      showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle dans le profil." : "Add your OpenRouter key and choose a model in the profile.");
+      showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle dans le profil." : "Add your OpenRouter key and choose a model in the profile.", "warning");
       return false;
     }
     setStudioAiLoading(true);
     setStudioAiNotice(null);
     try {
-      const response = await fetch("/api/studio-hook", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          apiKey: aiSettings.openrouterKey,
-          model: aiSettings.openrouterModel,
-          language: lang,
-          action,
-          target,
-          direction,
-          subject: project.subject,
-          currentHook: project.hook,
-          currentPromise: project.promise,
-          profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone },
-        }),
+      const response = await postJsonWithRetry("/api/studio-hook", {
+        apiKey: aiSettings.openrouterKey,
+        model: aiSettings.openrouterModel,
+        language: lang,
+        action,
+        target,
+        direction,
+        subject: project.subject,
+        currentHook: project.hook,
+        currentPromise: project.promise,
+        profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone },
       });
       const data = await response.json() as {
         result?: { hook?: string; promise?: string };
@@ -379,7 +500,7 @@ export default function ScriptStudio() {
       }
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : (lang === "fr" ? "Génération impossible" : "Generation failed");
+      const message = error instanceof TypeError ? connectionLostMessage(lang) : error instanceof Error ? error.message : (lang === "fr" ? "Génération impossible" : "Generation failed");
       setStudioAiNotice({ projectId: activeId, kind: "error", message });
       showToast(lang === "fr" ? "La génération a été interrompue" : "Generation was interrupted", "error");
       return false;
@@ -404,14 +525,11 @@ export default function ScriptStudio() {
     const plan = scriptPlan(profile, project);
     setStudioAiLoading(true); setStudioAiNotice(null);
     try {
-      const response = await fetch("/api/studio-chapters", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          apiKey: aiSettings.openrouterKey, model: aiSettings.writerModel, language: lang, subject: project.subject,
-          duration: profile.duration, targetBodyWords: plan.targetBodyWords, chapterCount: plan.chapterCount,
-          hook: project.hook, promise: project.promise,
-          profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone },
-        }),
+      const response = await postJsonWithRetry("/api/studio-chapters", {
+        apiKey: aiSettings.openrouterKey, model: aiSettings.writerModel, language: lang, subject: project.subject,
+        duration: profile.duration, targetBodyWords: plan.targetBodyWords, chapterCount: plan.chapterCount,
+        hook: project.hook, promise: project.promise,
+        profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone },
       });
       const data = await response.json() as { result?: { chapters?: Chapter[]; targetBodyWords?: number }; detail?: string; error?: string };
       if (!response.ok || !data.result?.chapters?.length) throw new Error(studioProviderError(response.status, data.detail || data.error));
@@ -424,7 +542,7 @@ export default function ScriptStudio() {
       showToast(lang === "fr" ? `${data.result.chapters.length} chapitres proposés par l’IA` : `${data.result.chapters.length} chapters proposed by AI`);
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : (lang === "fr" ? "Plan impossible à générer" : "Could not generate the chapter plan");
+      const message = error instanceof TypeError ? connectionLostMessage(lang) : error instanceof Error ? error.message : (lang === "fr" ? "Plan impossible à générer" : "Could not generate the chapter plan");
       setStudioAiNotice({ projectId: activeId, kind: "error", message }); showToast(lang === "fr" ? "La génération des chapitres a été interrompue" : "Chapter generation was interrupted", "error");
       return false;
     } finally { setStudioAiLoading(false); }
@@ -435,41 +553,100 @@ export default function ScriptStudio() {
     const plan = scriptPlan(profile, project);
     setStudioAiLoading(true); setStudioAiNotice(null);
     try {
-      const response = await fetch("/api/studio-write", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          apiKey: aiSettings.openrouterKey, model: aiSettings.writerModel, language: lang, action,
-          subject: project.subject, duration: profile.duration, targetBodyWords: project.bodyWordTarget || plan.targetBodyWords,
-          hook: project.hook, promise: project.promise, body: project.body, chapters: project.chapters,
-          profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, closing: profile.closing },
-        }),
+      if (action === "body") return await runBodySections(plan);
+      const response = await postJsonWithRetry("/api/studio-write", {
+        apiKey: aiSettings.openrouterKey, model: aiSettings.writerModel, language: lang, action: "conclusion",
+        subject: project.subject, duration: profile.duration, targetBodyWords: project.bodyWordTarget || plan.targetBodyWords,
+        hook: project.hook, promise: project.promise, body: project.body, chapters: project.chapters,
+        profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, closing: profile.closing },
       });
       const data = await response.json() as {
-        result?: { body?: string; conclusion?: string; wordCount?: number; targetBodyWords?: number };
-        warning?: { code?: string; actualWords?: number; targetWords?: number; targetMinimum?: number; deficit?: number; wordCount?: number; chapterDeficits?: Array<{ title?: string }> } | null;
+        result?: { conclusion?: string; wordCount?: number };
+        warning?: { code?: string; wordCount?: number } | null;
         detail?: string; error?: string;
       };
-      if (!response.ok) throw new Error(studioProviderError(response.status, data.detail || data.error));
-      if (action === "body") {
-        if (!data.result?.body) throw new Error(studioProviderError(response.status, data.detail || data.error));
-        updateProject({ body: data.result.body, bodyWordTarget: data.result.targetBodyWords ?? (project.bodyWordTarget || plan.targetBodyWords), bodyGeneratedByAi: true, bodyModel: aiSettings.writerModel, conclusion: "", reviewAccepted: false, completed: project.completed.filter(number => number <= 3) });
-        if (data.warning?.code === "body_under_target") {
-          const weakChapters = data.warning.chapterDeficits?.length ?? 0;
-          const message = lang === "fr" ? `Le corps contient ${data.warning.actualWords ?? wordCount(data.result.body)} mots. ${data.warning.deficit ? `Il manque encore environ ${data.warning.deficit} mots.` : "La longueur totale est atteinte."}${weakChapters ? ` ${weakChapters} chapitre(s) doivent encore être développés.` : ""}` : `The body contains ${data.warning.actualWords ?? wordCount(data.result.body)} words. ${data.warning.deficit ? `It is still about ${data.warning.deficit} words short.` : "The total length is reached."}${weakChapters ? ` ${weakChapters} chapter(s) still need development.` : ""}`;
-          setStudioAiNotice({ projectId: activeId, kind: "warning", message }); showToast(lang === "fr" ? "Corps généré, longueur à compléter" : "Body generated, length needs work", "warning");
-        } else showToast(lang === "fr" ? "Corps long format généré par l’IA" : "Long-form body generated by AI");
-      } else {
-        if (!data.result?.conclusion) throw new Error(studioProviderError(response.status, data.detail || data.error));
-        updateProject({ conclusion: data.result.conclusion, reviewAccepted: false, completed: project.completed.filter(number => number <= 4) });
-        if (data.warning) setStudioAiNotice({ projectId: activeId, kind: "warning", message: lang === "fr" ? `Conclusion générée : ${data.warning.wordCount ?? "?"} mots. Vérifiez sa longueur avant de valider.` : `Generated conclusion: ${data.warning.wordCount ?? "?"} words. Review its length before approval.` });
-        showToast(lang === "fr" ? "Conclusion générée par l’IA" : "Conclusion generated by AI");
-      }
+      if (!response.ok || !data.result?.conclusion) throw new Error(studioProviderError(response.status, data.detail || data.error));
+      updateProject({ conclusion: data.result.conclusion, reviewAccepted: false, completed: project.completed.filter(number => number <= 4) });
+      if (data.warning) setStudioAiNotice({ projectId: activeId, kind: "warning", message: lang === "fr" ? `Conclusion générée : ${data.warning.wordCount ?? "?"} mots. Vérifiez sa longueur avant de valider.` : `Generated conclusion: ${data.warning.wordCount ?? "?"} words. Review its length before approval.` });
+      showToast(lang === "fr" ? "Conclusion générée par l’IA" : "Conclusion generated by AI");
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : (lang === "fr" ? "Génération impossible" : "Generation failed");
+      const message = error instanceof TypeError ? connectionLostMessage(lang) : error instanceof Error ? error.message : (lang === "fr" ? "Génération impossible" : "Generation failed");
       setStudioAiNotice({ projectId: activeId, kind: "error", message }); showToast(lang === "fr" ? "La génération a été interrompue" : "Generation was interrupted", "error");
       return false;
-    } finally { setStudioAiLoading(false); }
+    } finally { setStudioAiLoading(false); setBodyProgress(null); }
+  };
+
+  // Chapter-by-chapter body generation. Each HTTP request writes one chapter, the body is
+  // assembled and persisted as it grows, and a failure keeps every completed chapter so
+  // "Réessayer" resumes at the first missing one instead of regenerating paid work.
+  const runBodySections = async (plan: ReturnType<typeof scriptPlan>) => {
+    const chapters = project.chapters;
+    const targetBodyWords = project.bodyWordTarget || plan.targetBodyWords;
+    const runId = ++bodyRunId.current;
+    const stored = project.bodySections ?? [];
+    const resumable = stored.length > 0 && stored.length < chapters.length
+      && stored.every((section, index) => section.id === chapters[index]?.id && section.script.trim().length >= 80);
+    const sections: BodySection[] = resumable ? [...stored] : [];
+    const weak: Array<{ title: string; actualWords: number; targetMinimum: number }> = [];
+    const persist = (extra: Partial<Project> = {}) => updateProject({
+      bodySections: sections.length ? [...sections] : undefined,
+      body: assembleBody(sections, chapters),
+      bodyGeneratedByAi: sections.length > 0, bodyModel: aiSettings.writerModel, bodyWordTarget: targetBodyWords,
+      conclusion: "", reviewAccepted: false, completed: project.completed.filter(number => number <= 3),
+      ...extra,
+    });
+    for (let index = sections.length; index < chapters.length; index += 1) {
+      setBodyProgress({ current: index + 1, total: chapters.length, title: chapters[index].title, retrying: false });
+      const failChapter = (reason: string) => {
+        const done = sections.length;
+        const message = lang === "fr"
+          ? `Le chapitre ${index + 1}/${chapters.length} « ${chapters[index].title} » n’a pas pu être rédigé. ${reason} ${done ? `Les ${done} chapitre(s) déjà rédigés sont conservés : « Réessayer » reprendra au chapitre ${index + 1} sans régénérer l’existant.` : "« Réessayer » relancera la rédaction."}`
+          : `Chapter ${index + 1}/${chapters.length} “${chapters[index].title}” could not be written. ${reason} ${done ? `The ${done} completed chapter(s) are kept: “Retry” resumes at chapter ${index + 1} without regenerating them.` : "“Retry” restarts the writing."}`;
+        persist();
+        setStudioAiNotice({ projectId: activeId, kind: "error", message });
+        showToast(lang === "fr" ? "La génération a été interrompue" : "Generation was interrupted", "error");
+      };
+      let response: Response;
+      try {
+        response = await postJsonWithRetry("/api/studio-write", {
+          apiKey: aiSettings.openrouterKey, model: aiSettings.writerModel, language: lang, action: "section",
+          subject: project.subject, duration: profile.duration, targetBodyWords,
+          hook: project.hook, promise: project.promise, chapters, sectionIndex: index,
+          previousSections: sections.slice(-2).map(({ id, script, transition }) => ({ id, script, transition })),
+          profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone },
+        }, () => setBodyProgress(current => current && { ...current, retrying: true }));
+      } catch {
+        if (bodyRunId.current === runId) failChapter(connectionLostMessage(lang));
+        return false;
+      }
+      if (bodyRunId.current !== runId) return false;
+      const data = await response.json().catch(() => ({})) as {
+        result?: { section?: { id?: string; script?: string; transition?: string }; wordCount?: number };
+        warning?: { code?: string; actualWords?: number; targetMinimum?: number } | null;
+        detail?: string; error?: string;
+      };
+      if (bodyRunId.current !== runId) return false;
+      if (!response.ok || !data.result?.section?.script) {
+        failChapter(studioProviderError(response.status, data.detail || data.error));
+        return false;
+      }
+      sections.push({ id: chapters[index].id, script: data.result.section.script, transition: data.result.section.transition ?? "" });
+      if (data.warning?.code === "section_under_target") weak.push({ title: chapters[index].title, actualWords: data.warning.actualWords ?? 0, targetMinimum: data.warning.targetMinimum ?? 0 });
+      persist();
+    }
+    const totalWords = wordCount(assembleBody(sections, chapters));
+    const targetMinimum = Math.round(targetBodyWords * 0.9);
+    persist({ bodySections: undefined });
+    if (totalWords < targetMinimum || weak.length) {
+      const deficit = Math.max(0, targetMinimum - totalWords);
+      const message = lang === "fr"
+        ? `Le corps contient ${totalWords} mots. ${deficit ? `Il manque encore environ ${deficit} mots.` : "La longueur totale est atteinte."}${weak.length ? ` ${weak.length} chapitre(s) doivent encore être développés.` : ""}`
+        : `The body contains ${totalWords} words. ${deficit ? `It is still about ${deficit} words short.` : "The total length is reached."}${weak.length ? ` ${weak.length} chapter(s) still need development.` : ""}`;
+      setStudioAiNotice({ projectId: activeId, kind: "warning", message });
+      showToast(lang === "fr" ? "Corps généré, longueur à compléter" : "Body generated, length needs work", "warning");
+    } else showToast(lang === "fr" ? "Corps long format généré par l’IA" : "Long-form body generated by AI");
+    return true;
   };
 
   const generateStep = async () => {
@@ -482,16 +659,16 @@ export default function ScriptStudio() {
 
   const validate = () => {
     const plan = scriptPlan(profile, project);
-    if (project.step === 1 && !project.confirmed) return showToast(t.answerToContinue);
-    if (project.step === 2 && (wordCount(project.hook) < 25 || wordCount(project.hook) > 40)) return showToast(lang === "fr" ? "Le hook doit contenir 25 à 40 mots." : "The hook must contain 25–40 words.");
-    if (project.step === 2 && !project.promise.trim()) return showToast(lang === "fr" ? "La promesse doit être renseignée." : "The promise is required.");
+    if (project.step === 1 && !project.confirmed) return showToast(t.answerToContinue, "warning");
+    if (project.step === 2 && (wordCount(project.hook) < 25 || wordCount(project.hook) > 40)) return showToast(lang === "fr" ? "Le hook doit contenir 25 à 40 mots." : "The hook must contain 25–40 words.", "warning");
+    if (project.step === 2 && !project.promise.trim()) return showToast(lang === "fr" ? "La promesse doit être renseignée." : "The promise is required.", "warning");
     if (project.step === 3 && (project.chapters.length < 5 || project.chapters.length > 12 || project.chapters.some(chapter => !chapter.title.trim() || !chapter.objective.trim() || chapter.keyPoints.length < 2 || chapter.keyPoints.length > 5 || chapter.keyPoints.some(point => !point.trim()) || !Number.isFinite(chapter.targetWords) || chapter.targetWords < 50))) return showToast(lang === "fr" ? "Validez un plan complet de 5 à 12 chapitres, avec 2 à 5 points clés remplis par chapitre." : "Approve a complete 5–12 chapter plan with 2–5 completed key points per chapter.", "error");
-    if (project.step === 4 && !project.body) return showToast(t.answerToContinue);
+    if (project.step === 4 && !project.body) return showToast(t.answerToContinue, "warning");
     if (project.step === 4 && wordCount(project.body) < plan.minimumBodyWords) return showToast(lang === "fr" ? `Le corps est trop court : ${wordCount(project.body)} mots. Minimum requis pour ${plan.minimum} minutes : ${plan.minimumBodyWords} mots.` : `The body is too short: ${wordCount(project.body)} words. Minimum for ${plan.minimum} minutes: ${plan.minimumBodyWords} words.`, "error");
     if (project.step === 4 && wordCount(project.body) > plan.maximumBodyWords) return showToast(lang === "fr" ? `Le corps est trop long : ${wordCount(project.body)} mots. Maximum conseillé pour ${plan.maximum} minutes : ${plan.maximumBodyWords} mots.` : `The body is too long: ${wordCount(project.body)} words. Recommended maximum for ${plan.maximum} minutes: ${plan.maximumBodyWords} words.`, "error");
-    if (project.step === 5 && !project.conclusion) return showToast(t.answerToContinue);
-    if (project.step === 6 && !project.reviewAccepted) return showToast(t.answerToContinue);
-    if (project.step === 7 && (!project.packageAnswers.visual || !project.packageAnswers.timecodes || !project.packageAnswers.links)) return showToast(t.answerToContinue);
+    if (project.step === 5 && !project.conclusion) return showToast(t.answerToContinue, "warning");
+    if (project.step === 6 && !project.reviewAccepted) return showToast(t.answerToContinue, "warning");
+    if (project.step === 7 && (!project.packageAnswers.timecodes.trim() || !project.packageAnswers.links.trim())) return showToast(t.answerToContinue, "warning");
     const completed = Array.from(new Set([...project.completed, project.step]));
     const nextStep = Math.min(7, project.step + 1);
     updateProject({ completed, step: nextStep, status: project.step === 7 ? (lang === "fr" ? "Packagé" : "Packaged") : (lang === "fr" ? "Script en cours" : "Script in progress") });
@@ -539,23 +716,31 @@ export default function ScriptStudio() {
             {t.steps.map((label, index) => { const number = index + 1; const state: StepState = project.step === number ? "active" : project.completed.includes(number) ? "done" : "todo"; return <button key={label} className={`step ${state}`} onClick={() => navigateStep(number)}><span>{state === "done" ? "✓" : number}</span><small>{label}</small></button>; })}
           </section>
           <div className="workspace">
-            <section className="editor"><Stage project={project} profile={profile} t={t} lang={lang} updateProject={updateProject} generate={generateStep} copy={copy} aiLoading={studioAiLoading} aiModel={aiSettings.openrouterModel} writerModel={aiSettings.writerModel} iterateHook={(target, direction) => runHookAi("iterate", target, direction)} />
+            <section className="editor"><Stage project={project} profile={profile} t={t} lang={lang} updateProject={updateProject} generate={generateStep} copy={copy} showToast={showToast} aiLoading={studioAiLoading} bodyProgress={bodyProgress} aiModel={aiSettings.openrouterModel} writerModel={aiSettings.writerModel} iterateHook={(target, direction) => runHookAi("iterate", target, direction)} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} script={script} />
               {studioAiNotice?.projectId === activeId && <div className={`studio-ai-notice ${studioAiNotice.kind}`} role={studioAiNotice.kind === "error" ? "alert" : "status"}>
                 <span>{studioAiNotice.kind === "error" ? "!" : "i"}</span>
                 <div><strong>{studioAiNotice.kind === "error" ? (lang === "fr" ? "La génération n’a pas abouti" : "Generation did not complete") : (lang === "fr" ? "Ajustement conseillé" : "Adjustment recommended")}</strong><p>{studioAiNotice.message}</p><div><button onClick={generateStep} disabled={studioAiLoading}>↻ {lang === "fr" ? "Réessayer" : "Retry"}</button><button onClick={() => setView("profile")}>{lang === "fr" ? "Choisir un autre modèle" : "Choose another model"}</button></div></div>
                 <button className="notice-close" aria-label={lang === "fr" ? "Fermer le message" : "Dismiss message"} onClick={() => setStudioAiNotice(null)}>×</button>
               </div>}
-              <div className="editor-actions">{project.step <= 5 && <button className="ghost" onClick={generateStep} disabled={studioAiLoading}>{studioAiLoading ? (lang === "fr" ? (project.step === 3 ? "L’IA construit le plan…" : project.step === 4 ? "L’IA rédige le corps long…" : project.step === 5 ? "L’IA conclut…" : "L’IA travaille…") : "AI is working…") : `↻ ${t.regenerate}`}</button>}<button className="primary" onClick={validate} disabled={studioAiLoading}>{t.validate} <span>→</span></button></div>
+              <div className="editor-actions">{project.step <= 5 && <button className="ghost" onClick={generateStep} disabled={studioAiLoading}>{studioAiLoading ? (bodyProgress ? (lang === "fr" ? `L’IA rédige le chapitre ${bodyProgress.current}/${bodyProgress.total} — ${bodyProgress.title}…${bodyProgress.retrying ? " (nouvelle tentative…)" : ""}` : `AI is writing chapter ${bodyProgress.current}/${bodyProgress.total} — ${bodyProgress.title}…${bodyProgress.retrying ? " (retrying…)" : ""}`) : lang === "fr" ? (project.step === 3 ? "L’IA construit le plan…" : project.step === 4 ? "L’IA rédige le corps long…" : project.step === 5 ? "L’IA conclut…" : "L’IA travaille…") : "AI is working…") : `↻ ${t.regenerate}`}</button>}<button className="primary" onClick={validate} disabled={studioAiLoading}>{t.validate} <span>→</span></button></div>
             </section>
             <aside className="guard-panel"><div className="guard-title"><span>◆</span><div><strong>{t.guard}</strong><small>{lang === "fr" ? "Pour cette génération" : "For this generation"}</small></div></div><Guard label={t.facts} /><Guard label={t.fixed} /><Guard label={t.oral} /><Guard label={t.sources} /><hr /><div className="context-box"><small>{lang === "fr" ? "CONTEXTE ACTIF" : "ACTIVE CONTEXT"}</small><strong>{profile.channel}</strong><p>{profile.audience}</p><button onClick={() => setView("profile")}>{lang === "fr" ? "Voir le profil" : "View profile"} →</button></div></aside>
           </div>
         </>}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
         {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} />}
-        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} showToast={message => showToast(message)} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
+        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
       </main>
       {newOpen && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title"><button className="modal-close" onClick={() => setNewOpen(false)}>×</button><span className="eyebrow">{lang === "fr" ? "NOUVEAU PROJET" : "NEW PROJECT"}</span><h2 id="new-project-title">{t.addSubject}</h2><p>{lang === "fr" ? "Soyez précis : le studio ne recherchera jamais une catégorie plus large." : "Be specific: the studio will never research a broader category."}</p><textarea value={newSubject} maxLength={2000} onChange={e => setNewSubject(e.target.value)} placeholder={lang === "fr" ? "Ex. Comment utiliser l’IA pour répondre aux clients sur WhatsApp Business" : "E.g. How to use AI to answer customers on WhatsApp Business"} /><div className="modal-actions"><button className="ghost" onClick={() => setNewOpen(false)}>{t.cancel}</button><button className="primary" onClick={createProject}>{t.create} →</button></div></div></div>}
-      {toast && <div className={`toast ${toast.kind}`} role={toast.kind === "error" ? "alert" : "status"}>{toast.kind === "success" ? "✓" : toast.kind === "warning" ? "i" : "!"} {toast.message}</div>}
+      {alerts.length > 0 && <div className="alert-stack" aria-live="polite" aria-relevant="additions" onMouseEnter={() => setAlertsPaused(true)} onMouseLeave={() => setAlertsPaused(false)} onFocusCapture={() => setAlertsPaused(true)} onBlurCapture={() => setAlertsPaused(false)}>
+        {alerts.length > 1 && <button className="alert-clear" onClick={() => setAlerts([])}>{lang === "fr" ? `Tout fermer (${alerts.length})` : `Dismiss all (${alerts.length})`}</button>}
+        {alerts.map(alert => <div key={alert.id} className={`alert ${alert.kind}`} role={alert.kind === "success" ? "status" : "alert"}>
+          <span className="alert-icon">{alert.kind === "success" ? "✓" : alert.kind === "warning" ? "i" : "!"}</span>
+          <p className="alert-message">{alert.message}</p>
+          {alert.count > 1 && <span className="alert-count">×{alert.count}</span>}
+          <button className="alert-close" aria-label={lang === "fr" ? "Fermer l’alerte" : "Dismiss alert"} onClick={() => dismissAlert(alert.id)}>×</button>
+        </div>)}
+      </div>}
     </div>
   );
 }
@@ -563,7 +748,7 @@ export default function ScriptStudio() {
 function NavButton({ active, icon, label, count, onClick }: { active: boolean; icon: string; label: string; count?: number; onClick: () => void }) { return <button className={active ? "active" : ""} onClick={onClick}><span>{icon}</span>{label}{count !== undefined && <i>{count}</i>}</button>; }
 function Guard({ label }: { label: string }) { return <div className="guard-item"><span>✓</span>{label}</div>; }
 
-function Stage({ project, profile, t, lang, updateProject, generate, copy, aiLoading, aiModel, writerModel, iterateHook }: { project: Project; profile: Profile; t: (typeof labels)[Lang]; lang: Lang; updateProject: (p: Partial<Project>) => void; generate: () => void; copy: (v: string) => void; aiLoading: boolean; aiModel: string; writerModel: string; iterateHook: (target: HookIterationTarget, direction: string) => Promise<boolean> }) {
+function Stage({ project, profile, t, lang, updateProject, generate, copy, showToast, aiLoading, bodyProgress, aiModel, writerModel, iterateHook, aiSettings, referenceThumbnails, openAiSettings, script }: { project: Project; profile: Profile; t: (typeof labels)[Lang]; lang: Lang; updateProject: (p: Partial<Project>) => void; generate: () => void; copy: (v: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiLoading: boolean; bodyProgress: { current: number; total: number; title: string; retrying: boolean } | null; aiModel: string; writerModel: string; iterateHook: (target: HookIterationTarget, direction: string) => Promise<boolean>; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void; script: string }) {
   const wc = wordCount(project.hook); const title = t.steps[project.step - 1]; const plan = scriptPlan(profile, project);
   const [iterationTarget, setIterationTarget] = useState<HookIterationTarget>("both");
   const [hookDirection, setHookDirection] = useState("");
@@ -592,16 +777,16 @@ function Stage({ project, profile, t, lang, updateProject, generate, copy, aiLoa
   if (project.step === 1) return <><StageHead n={1} title={title} desc={lang === "fr" ? "Confirmez le cadrage avant toute recherche." : "Confirm the scope before any research."} /><div className="chat-bubble"><span className="ai-avatar">S</span><div><small>Script Studio AI</small><p>{lang === "fr" ? `Pour confirmer : tu souhaites traiter exactement « ${project.subject} », sans élargir le sujet. C’est bien ça ?` : `To confirm: you want to cover exactly “${project.subject}”, without broadening the topic. Is that correct?`}</p></div></div>{!project.confirmed ? <button className="confirm-card" onClick={generate}>✓ {lang === "fr" ? "Oui, confirmer ce cadrage" : "Yes, confirm this scope"}</button> : <div className="result-card"><div className="result-head"><span>✓</span><div><strong>{lang === "fr" ? "Cadrage confirmé" : "Scope confirmed"}</strong><small>{profile.youtubeConnected ? "YouTube Data API" : t.noKey}</small></div></div><div className="position-grid"><Position tag="SÛR" title={lang === "fr" ? "La méthode pas à pas" : "The step-by-step method"} /><Position tag="DIFFÉRENCIANT" title={lang === "fr" ? "Ce qu’il faut garder humain" : "What must stay human"} /><Position tag="LOCAL" title={lang === "fr" ? "Cas concret pour l’audience" : "A real audience use case"} /></div><p className="note">{lang === "fr" ? "Aucune donnée de marché n’a été inventée. Collez une recherche externe ou connectez votre clé YouTube pour enrichir l’analyse." : "No market data was invented. Paste external research or connect your YouTube key to enrich the analysis."}</p></div>}</>;
   if (project.step === 2) { const invalidateHookDownstream = (patch: Partial<Project>) => updateProject({ ...patch, hookGeneratedByAi: false, chapters: [], body: "", conclusion: "", bodyGeneratedByAi: false, bodyModel: "", reviewAccepted: false, completed: project.completed.filter(number => number < 2) }); return <><StageHead n={2} title={title} desc={lang === "fr" ? "Accrochez en 10–15 secondes, puis installez une promesse tenue." : "Hook viewers in 10–15 seconds, then set a promise you can keep."} />{!project.hook ? <EmptyGenerate onClick={generate} t={t} lang={lang} /> : <><div className={`ai-generated-note ${project.hookGeneratedByAi ? "verified" : "manual"}`}><span>{project.hookGeneratedByAi ? "✦" : "✎"}</span><div><strong>{project.hookGeneratedByAi ? (lang === "fr" ? "Contenu généré avec l’IA" : "AI-generated content") : (lang === "fr" ? "Version existante ou modifiée manuellement" : "Existing or manually edited version")}</strong><small>{project.hookGeneratedByAi ? `${aiModel || "OpenRouter"} · ${lang === "fr" ? "modifiable manuellement ou avec vos orientations" : "editable manually or with your directions"}` : (lang === "fr" ? "Régénérez ou utilisez vos orientations pour créer une nouvelle version avec OpenRouter." : "Regenerate or use your directions to create a new version with OpenRouter.")}</small></div></div><OutputBlock label="HOOK" value={project.hook} onChange={v => invalidateHookDownstream({ hook: v })} copy={() => copy(project.hook)} meta={<><span className={wc > 40 ? "danger" : "good"}>{wc} / 40 {t.words}</span><span>≈ {Math.max(1, Math.round(wc / 2.7))} {t.seconds}</span></>} /><div className="locked-copy"><div><span>⌕</span><strong>{lang === "fr" ? "Présentation fixe" : "Fixed introduction"}</strong><small>{lang === "fr" ? "Protégée mot pour mot" : "Protected word for word"}</small></div><p>{profile.presentation}</p></div><OutputBlock label={lang === "fr" ? "PROMESSE" : "PROMISE"} value={project.promise} onChange={v => invalidateHookDownstream({ promise: v })} copy={() => copy(project.promise)} /><div className="locked-line"><span>⌕</span>{profile.launch}</div><section className="hook-iteration"><div className="hook-iteration-head"><span>✦</span><div><h3>{lang === "fr" ? "Affiner avec l’IA" : "Refine with AI"}</h3><p>{lang === "fr" ? "Proposez une modification ou donnez une orientation précise. Les textes fixes resteront intacts." : "Suggest a change or give a precise direction. Fixed copy will remain unchanged."}</p></div></div><div className="iteration-targets" aria-label={lang === "fr" ? "Élément à modifier" : "Content to edit"}><button className={iterationTarget === "hook" ? "active" : ""} onClick={() => setIterationTarget("hook")}>Hook</button><button className={iterationTarget === "promise" ? "active" : ""} onClick={() => setIterationTarget("promise")}>{lang === "fr" ? "Promesse" : "Promise"}</button><button className={iterationTarget === "both" ? "active" : ""} onClick={() => setIterationTarget("both")}>{lang === "fr" ? "Les deux" : "Both"}</button></div><div className="direction-suggestions">{suggestions.map(suggestion => <button key={suggestion} onClick={() => setHookDirection(suggestion)}>＋ {suggestion}</button>)}</div><label><span>{lang === "fr" ? "Vos orientations" : "Your directions"}</span><textarea value={hookDirection} maxLength={2000} onChange={event => setHookDirection(event.target.value)} rows={3} placeholder={lang === "fr" ? "Ex. Commence par une question plus provocante, garde un ton simple et évite le mot automatiser…" : "E.g. Start with a more provocative question, keep it simple, and avoid the word automate…"} /></label><div className="hook-iteration-action"><small>{lang === "fr" ? "L’IA réécrit uniquement la partie sélectionnée." : "AI rewrites only the selected part."}</small><button className="primary" onClick={applyHookDirection} disabled={aiLoading || !hookDirection.trim()}>{aiLoading ? (lang === "fr" ? "Application…" : "Applying…") : (lang === "fr" ? "Appliquer mes orientations" : "Apply my directions")} →</button></div></section></>}</>; }
   if (project.step === 3) return <><StageHead n={3} title={title} desc={lang === "fr" ? "Validez la structure avant que l’IA développe le moindre paragraphe." : "Approve the structure before AI develops any paragraph."} /><div className="chapter-plan-summary"><div><span>{profile.duration}</span><small>{lang === "fr" ? "durée cible" : "target duration"}</small></div><div><span>≈ {project.bodyWordTarget || plan.targetBodyWords}</span><small>{lang === "fr" ? "mots dans le corps" : "body words"}</small></div><div><span>{plan.chapterCount}</span><small>{lang === "fr" ? "chapitres recommandés" : "recommended chapters"}</small></div><div><span>HIGH</span><small>{writerModel || (lang === "fr" ? "modèle thinking" : "thinking model")}</small></div></div>{!project.chapters.length ? <EmptyGenerate onClick={generate} t={t} lang={lang} /> : <><div className="chapter-toolbar"><div><strong>{project.chapters.length} {lang === "fr" ? "chapitres proposés" : "proposed chapters"}</strong><small>{lang === "fr" ? "Modifiez, réordonnez ou précisez les points clés avant validation." : "Edit, reorder or refine the key points before approval."}</small></div><button onClick={addChapter} disabled={project.chapters.length >= 12}>＋ {lang === "fr" ? "Ajouter" : "Add"}</button></div><div className="chapter-list">{project.chapters.map((chapter, index) => <article className="chapter-card" key={chapter.id}><div className="chapter-index"><span>{String(index + 1).padStart(2, "0")}</span><small>{chapter.targetWords} {t.words}</small></div><div className="chapter-fields"><label><span>{lang === "fr" ? "Titre" : "Title"}</span><input value={chapter.title} maxLength={160} onChange={event => editChapter(chapter.id, { title: event.target.value })} /></label><label><span>{lang === "fr" ? "Objectif du chapitre" : "Chapter objective"}</span><textarea rows={2} value={chapter.objective} maxLength={800} onChange={event => editChapter(chapter.id, { objective: event.target.value })} /></label><label><span>{lang === "fr" ? "Points clés — un par ligne" : "Key points — one per line"}</span><textarea rows={3} value={chapter.keyPoints.join("\n")} onChange={event => editChapter(chapter.id, { keyPoints: event.target.value.split("\n").slice(0, 5) })} /></label></div><div className="chapter-actions"><button onClick={() => moveChapter(index, -1)} disabled={index === 0} aria-label={lang === "fr" ? "Monter le chapitre" : "Move chapter up"}>↑</button><button onClick={() => moveChapter(index, 1)} disabled={index === project.chapters.length - 1} aria-label={lang === "fr" ? "Descendre le chapitre" : "Move chapter down"}>↓</button><button className="remove" onClick={() => removeChapter(chapter.id)} disabled={project.chapters.length <= 5} aria-label={lang === "fr" ? "Supprimer le chapitre" : "Remove chapter"}>×</button></div></article>)}</div><p className="chapter-edit-warning">ⓘ {lang === "fr" ? "Toute modification du plan efface l’ancien corps devenu obsolète. Rien ne sera rédigé avant votre validation." : "Any plan edit clears the now-stale body. Nothing is written before your approval."}</p></>}</>;
-  if (project.step === 4) { const bodyWords = wordCount(project.body); const inRange = bodyWords >= plan.minimumBodyWords && bodyWords <= plan.maximumBodyWords; return <><StageHead n={4} title={title} desc={lang === "fr" ? `Corps long format fondé sur les ${project.chapters.length} chapitres validés.` : `Long-form body based on the ${project.chapters.length} approved chapters.`} /><div className={`body-target ${inRange ? "ready" : "short"}`}><div><strong>{bodyWords.toLocaleString(lang)} / {(project.bodyWordTarget || plan.targetBodyWords).toLocaleString(lang)} {t.words}</strong><small>{lang === "fr" ? `Minimum ${plan.minimumBodyWords.toLocaleString(lang)} mots pour ${plan.minimum} min` : `Minimum ${plan.minimumBodyWords.toLocaleString(lang)} words for ${plan.minimum} min`}</small></div><div><strong>≈ {plan.estimatedMinutes.toFixed(1)} min</strong><small>{lang === "fr" ? "vidéo complète estimée" : "estimated full video"}</small></div><span><i style={{ width: `${Math.min(100, bodyWords / Math.max(1, project.bodyWordTarget || plan.targetBodyWords) * 100)}%` }} /></span></div>{!project.body ? <EmptyGenerate onClick={generate} t={t} lang={lang} /> : <><div className={`ai-generated-note ${project.bodyGeneratedByAi ? "verified" : "manual"}`}><span>{project.bodyGeneratedByAi ? "✦" : "✎"}</span><div><strong>{project.bodyGeneratedByAi ? (lang === "fr" ? "Corps long généré avec réflexion élevée" : "Long-form body generated with high reasoning") : (lang === "fr" ? "Corps modifié manuellement" : "Manually edited body")}</strong><small>{project.bodyModel || writerModel}</small></div></div><OutputBlock label={lang === "fr" ? "CORPS DU SCRIPT" : "SCRIPT BODY"} value={project.body} onChange={v => updateProject({ body: v, bodyGeneratedByAi: false, conclusion: "", reviewAccepted: false, completed: project.completed.filter(number => number < 4) })} copy={() => copy(project.body)} rows={28} meta={<span className={bodyWords < plan.minimumBodyWords ? "danger" : "good"}>{bodyWords} {t.words}</span>} /></>}</> }
+  if (project.step === 4) { const bodyWords = wordCount(project.body); const inRange = bodyWords >= plan.minimumBodyWords && bodyWords <= plan.maximumBodyWords; return <><StageHead n={4} title={title} desc={lang === "fr" ? `Corps long format fondé sur les ${project.chapters.length} chapitres validés.` : `Long-form body based on the ${project.chapters.length} approved chapters.`} /><div className={`body-target ${inRange ? "ready" : "short"}`}><div><strong>{bodyWords.toLocaleString(lang)} / {(project.bodyWordTarget || plan.targetBodyWords).toLocaleString(lang)} {t.words}</strong><small>{lang === "fr" ? `Minimum ${plan.minimumBodyWords.toLocaleString(lang)} mots pour ${plan.minimum} min` : `Minimum ${plan.minimumBodyWords.toLocaleString(lang)} words for ${plan.minimum} min`}</small></div><div><strong>≈ {plan.estimatedMinutes.toFixed(1)} min</strong><small>{lang === "fr" ? "vidéo complète estimée" : "estimated full video"}</small></div><span><i style={{ width: `${Math.min(100, bodyWords / Math.max(1, project.bodyWordTarget || plan.targetBodyWords) * 100)}%` }} /></span></div>{!project.body ? <EmptyGenerate onClick={generate} t={t} lang={lang} busy={aiLoading} busyLabel={bodyProgress ? (lang === "fr" ? `L’IA rédige le chapitre ${bodyProgress.current}/${bodyProgress.total} — ${bodyProgress.title}…` : `AI is writing chapter ${bodyProgress.current}/${bodyProgress.total} — ${bodyProgress.title}…`) : undefined} /> : <><div className={`ai-generated-note ${project.bodyGeneratedByAi ? "verified" : "manual"}`}><span>{project.bodyGeneratedByAi ? "✦" : "✎"}</span><div><strong>{aiLoading && bodyProgress ? (lang === "fr" ? `Rédaction en cours — chapitre ${bodyProgress.current}/${bodyProgress.total}` : `Writing in progress — chapter ${bodyProgress.current}/${bodyProgress.total}`) : project.bodyGeneratedByAi ? (lang === "fr" ? "Corps long généré avec réflexion élevée" : "Long-form body generated with high reasoning") : (lang === "fr" ? "Corps modifié manuellement" : "Manually edited body")}</strong><small>{project.bodyModel || writerModel}</small></div></div><OutputBlock label={lang === "fr" ? "CORPS DU SCRIPT" : "SCRIPT BODY"} value={project.body} onChange={v => updateProject({ body: v, bodySections: undefined, bodyGeneratedByAi: false, conclusion: "", reviewAccepted: false, completed: project.completed.filter(number => number < 4) })} copy={() => copy(project.body)} rows={28} readOnly={aiLoading} meta={<span className={bodyWords < plan.minimumBodyWords ? "danger" : "good"}>{bodyWords} {t.words}</span>} /></>}</> }
   if (project.step === 5) return <><StageHead n={5} title={title} desc={lang === "fr" ? "L’IA récapitule uniquement ce que le corps validé a réellement démontré." : "AI recaps only what the approved body actually demonstrated."} />{!project.conclusion ? <EmptyGenerate onClick={generate} t={t} lang={lang} /> : <><div className="ai-generated-note verified"><span>✦</span><div><strong>{lang === "fr" ? "Conclusion générée depuis le corps complet" : "Conclusion generated from the complete body"}</strong><small>{writerModel} · high thinking</small></div></div><OutputBlock label="CONCLUSION" value={project.conclusion} onChange={v => updateProject({ conclusion: v, reviewAccepted: false, completed: project.completed.filter(number => number < 5) })} copy={() => copy(project.conclusion)} rows={10} meta={<span>{wordCount(project.conclusion)} {t.words}</span>} /><div className="locked-line"><span>⌕</span>{profile.closing}</div></>}</>;
   if (project.step === 6) { const chaptersCovered = project.chapters.length >= 5 && project.chapters.every((_, index) => project.body.includes(`CHAPITRE ${index + 1}`)); const durationValid = plan.estimatedMinutes >= plan.minimum && plan.estimatedMinutes <= plan.maximum; return <><StageHead n={6} title={title} desc={lang === "fr" ? "Le relecteur signale les contrôles automatiques et ceux qui exigent votre jugement." : "The reviewer separates automatic checks from those requiring your judgment."} /><div className="stop-banner"><span>Ⅱ</span><div><strong>{t.mandatoryStop}</strong><p>{lang === "fr" ? "Même en Pilote automatique, vous décidez avant le packaging." : "Even in Autopilot, you decide before packaging."}</p></div></div><div className="review-list"><Review status="warn" label={lang === "fr" ? "Vérifiez que le corps tient réellement la promesse" : "Confirm that the body truly fulfils the promise"} detail={lang === "fr" ? "Ce contrôle sémantique reste une décision humaine." : "This semantic check remains a human decision."} /><Review status={chaptersCovered ? "ok" : "warn"} label={chaptersCovered ? (lang === "fr" ? `${project.chapters.length} chapitres présents dans l’ordre` : `${project.chapters.length} chapters present in order`) : (lang === "fr" ? "Un ou plusieurs chapitres sont absents" : "One or more chapters are missing")} /><Review status={durationValid ? "ok" : "warn"} label={lang === "fr" ? `${wordCount(project.body)} mots · environ ${plan.estimatedMinutes.toFixed(1)} minutes` : `${wordCount(project.body)} words · about ${plan.estimatedMinutes.toFixed(1)} minutes`} /><Review status="warn" label={lang === "fr" ? "Vérifiez les faits, chiffres et sources avant publication" : "Verify facts, figures, and sources before publishing"} detail={lang === "fr" ? "Le studio n’affirme pas avoir vérifié automatiquement des sources absentes." : "The studio does not claim to have automatically verified missing sources."} /></div><label className="decision"><input type="checkbox" checked={project.reviewAccepted} onChange={e => updateProject({ reviewAccepted: e.target.checked })} /><span><strong>{lang === "fr" ? "J’ai effectué les vérifications humaines" : "I completed the human checks"}</strong><small>{lang === "fr" ? "Cette décision déverrouille l’étape 7." : "This decision unlocks step 7."}</small></span></label></>; }
-  return <Packaging project={project} updateProject={updateProject} lang={lang} t={t} copy={copy} />;
+  return <StudioPackaging project={project} profile={profile} updateProject={updateProject} lang={lang} t={t} copy={copy} showToast={showToast} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={openAiSettings} script={script} />;
 }
 
 function StageHead({ n, title, desc }: { n: number; title: string; desc: string }) { return <div className="stage-head"><span>ÉTAPE {n} / 7</span><h1>{title}</h1><p>{desc}</p></div>; }
 function Position({ tag, title }: { tag: string; title: string }) { return <div><span>{tag}</span><strong>{title}</strong><small>Score estimé · 82/100</small></div>; }
-function EmptyGenerate({ onClick, t, lang }: { onClick: () => void; t: (typeof labels)[Lang]; lang: Lang }) { return <div className="empty-generate"><span>✦</span><h3>{lang === "fr" ? "Tout est prêt pour cette étape" : "Everything is ready for this step"}</h3><p>{lang === "fr" ? "Le profil et les sorties validées seront utilisés comme contexte." : "Your profile and approved outputs will be used as context."}</p><button className="primary" onClick={onClick}>✦ {t.launch}</button></div>; }
-function OutputBlock({ label, value, onChange, copy, meta, rows = 5 }: { label: string; value: string; onChange: (v: string) => void; copy: () => void; meta?: React.ReactNode; rows?: number }) { return <div className="output-block"><div className="output-label"><span>{label}</span><div>{meta}<button onClick={copy}>⧉ Copier</button></div></div><textarea value={value} onChange={e => onChange(e.target.value)} rows={rows} /></div>; }
+function EmptyGenerate({ onClick, t, lang, busy = false, busyLabel }: { onClick: () => void; t: (typeof labels)[Lang]; lang: Lang; busy?: boolean; busyLabel?: string }) { return <div className="empty-generate"><span>✦</span><h3>{lang === "fr" ? "Tout est prêt pour cette étape" : "Everything is ready for this step"}</h3><p>{lang === "fr" ? "Le profil et les sorties validées seront utilisés comme contexte." : "Your profile and approved outputs will be used as context."}</p><button className="primary" onClick={onClick} disabled={busy}>✦ {busy ? (busyLabel ?? (lang === "fr" ? "Génération en cours…" : "Generating…")) : t.launch}</button></div>; }
+function OutputBlock({ label, value, onChange, copy, meta, rows = 5, readOnly = false }: { label: string; value: string; onChange: (v: string) => void; copy: () => void; meta?: React.ReactNode; rows?: number; readOnly?: boolean }) { return <div className="output-block"><div className="output-label"><span>{label}</span><div>{meta}<button onClick={copy}>⧉ Copier</button></div></div><textarea value={value} onChange={e => onChange(e.target.value)} rows={rows} readOnly={readOnly} /></div>; }
 function Review({ status, label, detail }: { status: "ok" | "warn"; label: string; detail?: string }) { return <div className={`review ${status}`}><span>{status === "ok" ? "✓" : "!"}</span><div><strong>{label}</strong>{detail && <small>{detail}</small>}</div></div>; }
 
 function quizChoices(item: PackagingResult["quiz"][number], lang: Lang) {
@@ -615,24 +800,63 @@ function quizClipboard(item: PackagingResult["quiz"][number], lang: Lang) {
   return `${item.question}\n${choices.map((choice, index) => `${letters[index]}. ${choice}`).join("\n")}\n${lang === "fr" ? "Bonne réponse" : "Correct answer"}: ${letters[item.correctOption ?? 0]}`;
 }
 
-function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, referenceThumbnails, openAiSettings }: {
+function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, referenceThumbnails, openAiSettings, autoStart, embedded }: {
   value: ExpressState; setValue: (value: ExpressState) => void; profile: Profile; lang: Lang;
-  copy: (value: string) => void; showToast: (value: string) => void; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void;
+  copy: (value: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiSettings: AiSettings; referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void;
+  autoStart?: boolean; embedded?: boolean;
 }) {
   const [loading, setLoading] = useState<"package" | "images" | null>(null);
   const [images, setImages] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<{ id: string; src: string; title: string; caption: string } | null>(null);
+  const [promptEditor, setPromptEditor] = useState<{ optionId: string; index: number; draft: string; direction: string } | null>(null);
+  const [promptLoading, setPromptLoading] = useState(false);
   const update = (patch: Partial<ExpressState>) => setValue({ ...value, ...patch });
   const configured = Boolean(aiSettings.openrouterKey && aiSettings.openrouterModel);
+  const autoStarted = useRef(false);
+
+  const savePrompt = () => {
+    if (!promptEditor || !value.package) return;
+    const nextPrompt = promptEditor.draft.trim();
+    if (!nextPrompt) return;
+    update({ package: { ...value.package, options: value.package.options.map(option => option.id !== promptEditor.optionId ? option : { ...option, concepts: option.concepts.map((concept, index) => index === promptEditor.index ? { ...concept, prompt: nextPrompt } : concept) }) } });
+    setPromptEditor(null);
+    showToast(lang === "fr" ? "Prompt de miniature mis à jour" : "Thumbnail prompt updated");
+  };
+
+  const regeneratePrompt = async (option: PackagingOption) => {
+    if (!promptEditor || promptLoading) return;
+    if (!configured) return showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle." : "Add your OpenRouter key and choose a model.", "warning");
+    setPromptLoading(true);
+    try {
+      const response = await postJsonWithRetry("/api/concept-prompt", {
+        apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang,
+        topic: value.package?.topic ?? value.subject, title: option.title, overlay: option.overlay,
+        conceptName: option.concepts[promptEditor.index]?.name ?? "", currentPrompt: promptEditor.draft, direction: promptEditor.direction,
+        profile: { channel: profile.channel, theme: profile.theme, thumbnailSystemPrompt: profile.thumbnailSystemPrompt },
+      });
+      const data = await response.json() as { prompt?: string; detail?: string; error?: string };
+      const prompt = data.prompt;
+      if (!response.ok || !prompt) throw new Error(data.detail || data.error || "prompt_failed");
+      setPromptEditor(current => current && { ...current, draft: prompt });
+      showToast(lang === "fr" ? "Prompt régénéré — vérifiez puis enregistrez" : "Prompt regenerated — review then save");
+    } catch (error) {
+      showToast(error instanceof TypeError ? connectionLostMessage(lang) : lang === "fr" ? `OpenRouter : ${error instanceof Error ? error.message : "régénération impossible"}` : `OpenRouter: ${error instanceof Error ? error.message : "regeneration failed"}`, "error");
+    } finally { setPromptLoading(false); }
+  };
+
+  useEffect(() => {
+    if (!preview) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setPreview(null); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [preview]);
 
   const generate = async () => {
-    if (value.source.trim().length < 80) return showToast(lang === "fr" ? "Ajoutez au moins 80 caractères de contenu." : "Add at least 80 characters of content.");
-    if (!configured) return showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle." : "Add your OpenRouter key and choose a model.");
+    if (value.source.trim().length < 80) return showToast(lang === "fr" ? "Ajoutez au moins 80 caractères de contenu." : "Add at least 80 characters of content.", "warning");
+    if (!configured) return showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle." : "Add your OpenRouter key and choose a model.", "warning");
     setLoading("package");
     try {
-      const response = await fetch("/api/openrouter-generate", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt, descriptionFooter: profile.descriptionFooter } }),
-      });
+      const response = await postJsonWithRetry("/api/openrouter-generate", { apiKey: aiSettings.openrouterKey, model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt, descriptionFooter: profile.descriptionFooter } });
       const data = await response.json() as { result?: PackagingResult; error?: string; detail?: string };
       if (response.status === 401) throw new Error(lang === "fr" ? "Clé OpenRouter refusée. Testez-la dans le profil." : "OpenRouter rejected the key. Test it in your profile.");
       if (!response.ok || !data.result) throw new Error(data.detail || data.error || "generation_failed");
@@ -641,9 +865,18 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
       update({ generated: true, thumbnailsGenerated: false, package: result, vidiqScores: {}, vidiqStatus: "idle", selected: { A: 0, B: 0, C: 0 } });
       setImages({});
     } catch (error) {
-      showToast(lang === "fr" ? `OpenRouter : ${error instanceof Error ? error.message : "génération impossible"}` : `OpenRouter: ${error instanceof Error ? error.message : "generation failed"}`);
+      showToast(error instanceof TypeError ? connectionLostMessage(lang) : lang === "fr" ? `OpenRouter : ${error instanceof Error ? error.message : "génération impossible"}` : `OpenRouter: ${error instanceof Error ? error.message : "generation failed"}`, "error");
     } finally { setLoading(null); }
   };
+
+  // Fires once per mount: the studio hands over an already-approved script, so there is
+  // nothing left to click before generating.
+  useEffect(() => {
+    if (!autoStart || autoStarted.current || value.generated || loading !== null) return;
+    autoStarted.current = true;
+    generate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, value.generated, loading]);
 
   const syncVidiqScores = async (options: PackagingOption[]) => {
     update({ vidiqStatus: "loading" });
@@ -655,12 +888,12 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
       showToast(lang === "fr" ? "Scores vidIQ synchronisés" : "vidIQ scores synced");
     } catch {
       update({ vidiqStatus: "error" });
-      showToast(lang === "fr" ? "Connexion vidIQ indisponible. Aucun score n’a été estimé." : "vidIQ unavailable. No score was estimated.");
+      showToast(lang === "fr" ? "Connexion vidIQ indisponible. Aucun score n’a été estimé." : "vidIQ unavailable. No score was estimated.", "error");
     }
   };
 
   const generateThumbnails = async (options: PackagingOption[]) => {
-    if (!aiSettings.openaiKey) return showToast(lang === "fr" ? "Ajoutez votre clé OpenAI dans le Profil de chaîne." : "Add your OpenAI key in Channel profile.");
+    if (!aiSettings.openaiKey) return showToast(lang === "fr" ? "Ajoutez votre clé OpenAI dans le Profil de chaîne." : "Add your OpenAI key in Channel profile.", "warning");
     setLoading("images");
     try {
       const generated = await Promise.all(options.map(async option => {
@@ -679,7 +912,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
       showToast(lang === "fr" ? "3 miniatures réellement générées" : "3 thumbnails generated");
     } catch (error) {
       update({ thumbnailsGenerated: false });
-      showToast(lang === "fr" ? `OpenAI : ${error instanceof Error ? error.message : "génération impossible"}` : `OpenAI: ${error instanceof Error ? error.message : "generation failed"}`);
+      showToast(lang === "fr" ? `OpenAI : ${error instanceof Error ? error.message : "génération impossible"}` : `OpenAI: ${error instanceof Error ? error.message : "generation failed"}`, "error");
     } finally { setLoading(null); }
   };
 
@@ -696,7 +929,16 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     image.src = src;
   };
 
-  if (!value.generated || !value.package) return <div className="express-page">
+  if (!value.generated || !value.package) return embedded ? <div className={`studio-packaging-pending ${configured ? "ready" : "blocked"}`}>
+    <span>{configured ? "✦" : "!"}</span>
+    <div>
+      <strong>{loading === "package" ? (lang === "fr" ? "L’IA prépare le packaging…" : "AI is preparing the packaging…") : configured ? (lang === "fr" ? "Packaging prêt à générer" : "Packaging ready to generate") : (lang === "fr" ? "Configuration IA requise" : "AI setup required")}</strong>
+      <small>{configured ? (lang === "fr" ? `${aiSettings.openrouterModel} · à partir du script validé et de vos réponses, sans rien inventer` : `${aiSettings.openrouterModel} · from the approved script and your answers, inventing nothing`) : (lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle dans le Profil de chaîne." : "Add your OpenRouter key and choose a model in Channel profile.")}</small>
+    </div>
+    {configured
+      ? <button className="primary" onClick={generate} disabled={loading !== null}>{loading === "package" ? (lang === "fr" ? "Génération…" : "Generating…") : (lang === "fr" ? "Générer le packaging" : "Generate packaging")}</button>
+      : <button onClick={openAiSettings}>{lang === "fr" ? "Configurer" : "Configure"} →</button>}
+  </div> : <div className="express-page">
     <div className="express-hero"><div><span className="eyebrow">{lang === "fr" ? "VIDÉO DÉJÀ TOURNÉE" : "VIDEO ALREADY RECORDED"}</span><h1>{lang === "fr" ? "Du contenu au clic." : "From content to click."}</h1><p>{lang === "fr" ? "Collez votre script ou votre description. Le modèle OpenRouter choisi prépare le packaging, puis OpenAI génère les vraies miniatures." : "Paste your script or description. Your chosen OpenRouter model prepares the packaging, then OpenAI generates real thumbnails."}</p></div><div className="express-orbit"><span>3×3</span><small>{lang === "fr" ? "titres × concepts" : "titles × concepts"}</small></div></div>
     <section className="express-input-card">
       <div className={`ai-ready-strip ${configured && aiSettings.openaiKey ? "ready" : ""}`}><span>{configured && aiSettings.openaiKey ? "✓" : "!"}</span><div><strong>{configured && aiSettings.openaiKey ? (lang === "fr" ? "IA configurée" : "AI configured") : (lang === "fr" ? "Configuration IA requise" : "AI setup required")}</strong><small>{configured ? aiSettings.openrouterModel : (lang === "fr" ? "Clé OpenRouter + modèle requis" : "OpenRouter key + model required")} · {aiSettings.openaiKey ? aiSettings.imageModel : (lang === "fr" ? "clé OpenAI manquante" : "OpenAI key missing")} · {aiSettings.rememberKeys ? (lang === "fr" ? "clés mémorisées sur cet appareil" : "keys remembered on this device") : (lang === "fr" ? "session uniquement" : "session only")}</small></div><button onClick={openAiSettings}>{lang === "fr" ? "Configurer" : "Configure"}</button></div>
@@ -716,23 +958,49 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     const bestScore = value.vidiqScores?.[best.id];
     return typeof bestScore !== "number" || optionScore > bestScore ? option : best;
   }, undefined);
-  return <div className="express-page results">
-    <div className="express-result-head"><div><button onClick={() => update({ generated: false, thumbnailsGenerated: false })}>← {lang === "fr" ? "Modifier la source" : "Edit source"}</button><span className="eyebrow">{lang === "fr" ? "PACKAGING EXPRESS · IA" : "AI EXPRESS PACKAGING"}</span><h1>{pack.topic}</h1></div><div className="result-status"><span>✓</span><div><strong>{lang === "fr" ? "Généré par" : "Generated by"} {aiSettings.openrouterModel}</strong><small>{value.inputType === "script" ? "Script + quiz" : (lang === "fr" ? "Description seule" : "Description only")}</small></div></div></div>
+  return <div className={`express-page results${embedded ? " embedded" : ""}`}>
+    <div className="express-result-head"><div>{embedded
+      ? <button onClick={generate} disabled={loading !== null}>↻ {loading === "package" ? (lang === "fr" ? "Régénération…" : "Regenerating…") : (lang === "fr" ? "Régénérer le packaging" : "Regenerate packaging")}</button>
+      : <button onClick={() => update({ generated: false, thumbnailsGenerated: false })}>← {lang === "fr" ? "Modifier la source" : "Edit source"}</button>}<span className="eyebrow">{embedded ? (lang === "fr" ? "PACKAGING · ÉTAPE 7" : "PACKAGING · STEP 7") : (lang === "fr" ? "PACKAGING EXPRESS · IA" : "AI EXPRESS PACKAGING")}</span><h1>{pack.topic}</h1></div><div className="result-status"><span>✓</span><div><strong>{lang === "fr" ? "Généré par" : "Generated by"} {aiSettings.openrouterModel}</strong><small>{value.inputType === "script" ? "Script + quiz" : (lang === "fr" ? "Description seule" : "Description only")}</small></div></div></div>
     <section className="express-section"><div className="express-section-title"><span>01</span><div><h2>{lang === "fr" ? "Tests A/B/C" : "A/B/C tests"}</h2><p>{lang === "fr" ? "Choisissez un concept visuel pour chaque paire titre–description." : "Choose one visual concept for each title–description pair."}</p></div><button className={`vidiq-sync ${value.vidiqStatus || "idle"}`} onClick={() => syncVidiqScores(pack.options)} disabled={value.vidiqStatus === "loading"}>{value.vidiqStatus === "loading" ? (lang === "fr" ? "Synchronisation…" : "Syncing…") : (lang === "fr" ? "Synchroniser les scores vidIQ" : "Sync vidIQ scores")}</button></div>
-      <div className="ab-options">{pack.options.map(option => <article className="ab-option" key={option.id}><div className="ab-option-head"><span>OPTION {option.id}</span><small>{option.register}</small></div><div className={`vidiq-score ${value.vidiqScores?.[option.id] !== undefined ? "ready" : "pending"}`}><b>{value.vidiqScores?.[option.id] ?? "—"}</b><span>{value.vidiqScores?.[option.id] !== undefined ? "/100 · vidIQ" : (lang === "fr" ? "score vidIQ en attente" : "vidIQ score pending")}</span></div><h3>{option.title}</h3><p>{option.description}</p><div className="copy-row"><button onClick={() => copy(option.title)}>⧉ {lang === "fr" ? "Titre" : "Title"}</button><button onClick={() => copy(option.description)}>⧉ Description</button></div><div className="concept-list"><strong>{lang === "fr" ? "3 concepts de miniature" : "3 thumbnail concepts"}</strong>{option.concepts.map((concept, index) => <button className={value.selected[option.id] === index ? "selected" : ""} key={`${option.id}-${index}`} onClick={() => { update({ selected: { ...value.selected, [option.id]: index }, thumbnailsGenerated: false }); setImages({}); }}><span>{value.selected[option.id] === index ? "✓" : index + 1}</span><div><b>{concept.name}</b><small>{concept.prompt}</small></div></button>)}</div></article>)}</div>
+      <div className="ab-options">{pack.options.map(option => <article className="ab-option" key={option.id}><div className="ab-option-head"><span>OPTION {option.id}</span><small>{option.register}</small></div><div className={`vidiq-score ${value.vidiqScores?.[option.id] !== undefined ? "ready" : "pending"}`}><b>{value.vidiqScores?.[option.id] ?? "—"}</b><span>{value.vidiqScores?.[option.id] !== undefined ? "/100 · vidIQ" : (lang === "fr" ? "score vidIQ en attente" : "vidIQ score pending")}</span></div><h3>{option.title}</h3><p>{option.description}</p><div className="copy-row"><button onClick={() => copy(option.title)}>⧉ {lang === "fr" ? "Titre" : "Title"}</button><button onClick={() => copy(option.description)}>⧉ Description</button></div><div className="concept-list"><strong>{lang === "fr" ? "3 concepts de miniature" : "3 thumbnail concepts"}</strong>{option.concepts.map((concept, index) => { const editing = promptEditor?.optionId === option.id && promptEditor.index === index; return <div className={`concept-row ${value.selected[option.id] === index ? "selected" : ""}`} key={`${option.id}-${index}`}>
+        <button className="concept-select" onClick={() => { update({ selected: { ...value.selected, [option.id]: index }, thumbnailsGenerated: false }); setImages({}); }}><span>{value.selected[option.id] === index ? "✓" : index + 1}</span><div><b>{concept.name}</b><small>{concept.prompt}</small></div></button>
+        <button className="concept-edit" aria-label={lang === "fr" ? `Modifier le prompt du concept « ${concept.name} »` : `Edit the prompt of concept “${concept.name}”`} aria-expanded={editing} onClick={() => setPromptEditor(editing ? null : { optionId: option.id, index, draft: concept.prompt, direction: "" })}>✎</button>
+        {editing && promptEditor && <div className="prompt-editor">
+          <label><span>{lang === "fr" ? "Prompt d’image (en anglais)" : "Image prompt (English)"}</span><textarea rows={5} maxLength={4000} value={promptEditor.draft} onChange={event => setPromptEditor({ ...promptEditor, draft: event.target.value })} /></label>
+          <label><span>{lang === "fr" ? "Orientation pour l’IA (facultatif)" : "Direction for AI (optional)"}</span><input maxLength={1500} value={promptEditor.direction} onChange={event => setPromptEditor({ ...promptEditor, direction: event.target.value })} placeholder={lang === "fr" ? "Ex. fond plus sombre, gros plan sur le téléphone, ambiance studio…" : "E.g. darker background, close-up on the phone, studio mood…"} /></label>
+          <div className="prompt-editor-actions">
+            <button onClick={() => setPromptEditor(null)}>{lang === "fr" ? "Annuler" : "Cancel"}</button>
+            <button onClick={() => regeneratePrompt(option)} disabled={promptLoading}>✦ {promptLoading ? (lang === "fr" ? "Régénération…" : "Regenerating…") : (lang === "fr" ? "Régénérer avec l’IA" : "Regenerate with AI")}</button>
+            <button className="primary" onClick={savePrompt} disabled={promptLoading || !promptEditor.draft.trim()}>{lang === "fr" ? "Enregistrer" : "Save"}</button>
+          </div>
+        </div>}
+      </div>; })}</div></article>)}</div>
       <div className="vidiq-truth-note">◆ {value.vidiqStatus === "error" ? (lang === "fr" ? "vidIQ n’a renvoyé aucun score. Aucun remplacement n’est affiché." : "vidIQ returned no score. No replacement is displayed.") : (lang === "fr" ? "Les valeurs vidIQ sont affichées telles quelles, sans estimation locale." : "vidIQ values are shown exactly as returned, with no local estimate.")}</div>
       <div className={`english-winner ${bestScoredOption ? "ready" : "pending"}`}><div className="english-winner-head"><div><span>EN</span><div><strong>{lang === "fr" ? "Meilleur packaging en anglais" : "Top-scoring packaging in English"}</strong><small>{bestScoredOption ? `OPTION ${bestScoredOption.id} · ${value.vidiqScores?.[bestScoredOption.id]}/100 vidIQ` : (lang === "fr" ? "Disponible après la synchronisation vidIQ" : "Available after vidIQ synchronization")}</small></div></div>{bestScoredOption && <button onClick={() => copy(`${bestScoredOption.englishTitle ?? bestScoredOption.title}\n\n${bestScoredOption.englishDescription ?? bestScoredOption.description}`)}>⧉ {lang === "fr" ? "Copier l’ensemble" : "Copy all"}</button>}</div>{bestScoredOption ? <div className="english-winner-copy"><article><small>ENGLISH TITLE</small><h3>{bestScoredOption.englishTitle ?? bestScoredOption.title}</h3><button onClick={() => copy(bestScoredOption.englishTitle ?? bestScoredOption.title)}>⧉</button></article><article><small>ENGLISH DESCRIPTION</small><p>{bestScoredOption.englishDescription ?? bestScoredOption.description}</p><button onClick={() => copy(bestScoredOption.englishDescription ?? bestScoredOption.description)}>⧉</button></article></div> : <p>{lang === "fr" ? "Cliquez sur « Synchroniser les scores vidIQ » : la traduction anglaise de l’option gagnante apparaîtra ici." : "Click “Sync vidIQ scores” to display the English version of the winning option here."}</p>}</div>
       {(referenceThumbnails.length > 0 || profile.thumbnailSystemPrompt) && <div className="visual-dna-active">◆ {lang === "fr" ? "ADN visuel actif" : "Visual DNA active"} · {referenceThumbnails.length} {lang === "fr" ? "référence(s)" : "reference(s)"} · {profile.thumbnailSystemPrompt ? (lang === "fr" ? "prompt système appliqué" : "system prompt applied") : (lang === "fr" ? "prompt système à générer" : "system prompt pending")}</div>}
       <button className="primary thumbnail-cta" onClick={() => generateThumbnails(pack.options)} disabled={loading !== null}>✦ {loading === "images" ? (lang === "fr" ? "OpenAI génère 3 images…" : "OpenAI is generating 3 images…") : (lang === "fr" ? "Générer les 3 vraies miniatures" : "Generate 3 real thumbnails")}</button>
       {!aiSettings.openaiKey && <button className="inline-config" onClick={openAiSettings}>{lang === "fr" ? "Ajouter la clé OpenAI" : "Add OpenAI key"} →</button>}
     </section>
-    {value.thumbnailsGenerated && Object.keys(images).length === 3 && <section className="express-section generated-thumbnails"><div className="express-section-title"><span>02</span><div><h2>{lang === "fr" ? "Miniatures générées par OpenAI" : "OpenAI-generated thumbnails"}</h2><p>{lang === "fr" ? "Téléchargez chaque PNG recadré automatiquement en 1280 × 720." : "Download each PNG automatically cropped to 1280 × 720."}</p></div></div><div className="thumbnail-grid">{pack.options.map(option => <figure key={option.id} className="thumbnail-preview real-thumbnail"><img src={images[option.id]} alt={`${lang === "fr" ? "Miniature" : "Thumbnail"} ${option.id}: ${option.title}`} /><figcaption><strong>{option.overlay}</strong><span>{option.concepts[value.selected[option.id] ?? 0].name}</span></figcaption><button onClick={() => downloadThumbnail(images[option.id], option.id)}>↓ PNG · 1280 × 720</button></figure>)}</div></section>}
+    {value.thumbnailsGenerated && Object.keys(images).length === 3 && <section className="express-section generated-thumbnails"><div className="express-section-title"><span>02</span><div><h2>{lang === "fr" ? "Miniatures générées par OpenAI" : "OpenAI-generated thumbnails"}</h2><p>{lang === "fr" ? "Téléchargez chaque PNG recadré automatiquement en 1280 × 720." : "Download each PNG automatically cropped to 1280 × 720."}</p></div></div><div className="thumbnail-grid">{pack.options.map(option => <figure key={option.id} className="thumbnail-preview real-thumbnail"><img src={images[option.id]} alt={`${lang === "fr" ? "Miniature" : "Thumbnail"} ${option.id}: ${option.title}`} /><button className="thumbnail-zoom" aria-label={lang === "fr" ? `Agrandir la miniature ${option.id}` : `Enlarge thumbnail ${option.id}`} onClick={() => setPreview({ id: option.id, src: images[option.id], title: option.overlay, caption: option.concepts[value.selected[option.id] ?? 0].name })} /><figcaption><strong>{option.overlay}</strong><span>{option.concepts[value.selected[option.id] ?? 0].name}</span></figcaption><button className="thumbnail-download" onClick={() => downloadThumbnail(images[option.id], option.id)}>↓ PNG · 1280 × 720</button></figure>)}</div></section>}
     <section className="express-section"><div className="express-section-title"><span>{value.thumbnailsGenerated ? "03" : "02"}</span><div><h2>{lang === "fr" ? "Description, tags & commentaire épinglé" : "Description, tags & pinned comment"}</h2><p>{lang === "fr" ? "Générés par le modèle sélectionné et prêts à copier." : "Generated by the selected model and ready to copy."}</p></div></div><div className="delivery-grid"><div className="delivery-card"><div><strong>{lang === "fr" ? "DESCRIPTION AMÉLIORÉE" : "IMPROVED DESCRIPTION"}</strong><button onClick={() => copy(pack.improvedDescription)}>⧉ {lang === "fr" ? "Copier" : "Copy"}</button></div><pre>{pack.improvedDescription}</pre></div><div className="delivery-card tags-card"><div><strong>TAGS</strong><button onClick={() => copy(pack.tags.join(", "))}>⧉ {lang === "fr" ? "Copier tout" : "Copy all"}</button></div><div>{pack.tags.map(tag => <span key={tag}>{tag}</span>)}</div></div></div><div className="pinned-comment-card"><div><span>📌</span><div><strong>{lang === "fr" ? "COMMENTAIRE À ÉPINGLER" : "PINNED COMMENT"}</strong><small>{lang === "fr" ? "Une relance naturelle pour engager la discussion sous la vidéo." : "A natural prompt to start a conversation below the video."}</small></div><button onClick={() => copy(pack.pinnedComment ?? "")} disabled={!pack.pinnedComment}>⧉ {lang === "fr" ? "Copier" : "Copy"}</button></div><p>{pack.pinnedComment ?? (lang === "fr" ? "Régénérez le packaging pour créer le commentaire épinglé." : "Regenerate the packaging to create the pinned comment.")}</p></div></section>
     {value.inputType === "script" && <section className="express-section"><div className="express-section-title"><span>{value.thumbnailsGenerated ? "04" : "03"}</span><div><h2>{lang === "fr" ? "5 quiz à trois choix" : "5 three-choice quizzes"}</h2><p>{lang === "fr" ? "Chaque question propose exactement trois réponses ; la bonne est appuyée par le script." : "Each question has exactly three answers; the correct one is supported by the script."}</p></div></div><div className="quiz-list">{pack.quiz.map((item, index) => { const choices = quizChoices(item, lang); const correctOption = item.correctOption ?? 0; return <article key={`${index}-${item.question}`}><span>{index + 1}</span><div><strong>{item.question}</strong><ol>{choices.map((choice, choiceIndex) => <li className={choiceIndex === correctOption ? "correct" : ""} key={`${choiceIndex}-${choice}`}><b>{String.fromCharCode(65 + choiceIndex)}</b><span>{choice}</span>{choiceIndex === correctOption && <em>✓ {lang === "fr" ? "Bonne réponse" : "Correct"}</em>}</li>)}</ol></div><button onClick={() => copy(quizClipboard(item, lang))} aria-label={lang === "fr" ? "Copier le quiz" : "Copy quiz"}>⧉</button></article>; })}</div></section>}
+    {preview && <div className="lightbox-backdrop" role="dialog" aria-modal="true" aria-label={lang === "fr" ? `Miniature ${preview.id} en grand format` : `Thumbnail ${preview.id} enlarged`}>
+      <button className="lightbox-scrim" aria-label={lang === "fr" ? "Fermer l’aperçu" : "Close preview"} onClick={() => setPreview(null)} />
+      <figure className="lightbox">
+        <img src={preview.src} alt={`${lang === "fr" ? "Miniature" : "Thumbnail"} ${preview.id}: ${preview.title}`} />
+        <figcaption><strong>OPTION {preview.id} · {preview.title}</strong><span>{preview.caption} · 1280 × 720</span></figcaption>
+        <div className="lightbox-actions">
+          <button onClick={() => downloadThumbnail(preview.src, preview.id)}>↓ {lang === "fr" ? "Télécharger le PNG" : "Download PNG"}</button>
+          <button onClick={() => setPreview(null)}>{lang === "fr" ? "Fermer" : "Close"}</button>
+        </div>
+        <button className="lightbox-close" aria-label={lang === "fr" ? "Fermer l’aperçu" : "Close preview"} onClick={() => setPreview(null)}>×</button>
+      </figure>
+    </div>}
   </div>;
 }
 
-function ExpressPackaging({ value, setValue, profile, lang, copy, showToast }: { value: ExpressState; setValue: (value: ExpressState) => void; profile: Profile; lang: Lang; copy: (value: string) => void; showToast: (value: string) => void }) {
+function ExpressPackaging({ value, setValue, profile, lang, copy, showToast }: { value: ExpressState; setValue: (value: ExpressState) => void; profile: Profile; lang: Lang; copy: (value: string) => void; showToast: (message: string, kind?: AlertKind) => void }) {
   const [loading, setLoading] = useState(false);
   const sourceSentences = value.source.split(/(?<=[.!?])\s+/).map(item => item.trim()).filter(Boolean);
   const sourceTopic = (value.subject.trim() || sourceSentences[0] || (lang === "fr" ? "Votre vidéo" : "Your video")).replace(/[.!?]+$/, "");
@@ -783,8 +1051,8 @@ function ExpressPackaging({ value, setValue, profile, lang, copy, showToast }: {
   const quiz = quizPrompts.map((question, index) => ({ question, answer: sourceSentences[index] || sourceSentences[0] || value.source }));
   const update = (patch: Partial<ExpressState>) => setValue({ ...value, ...patch });
   const generate = () => {
-    if (value.source.trim().length < 80) return showToast(lang === "fr" ? "Ajoutez au moins 80 caractères de contenu." : "Add at least 80 characters of content.");
-    if (!profile.vidiqConnected) return showToast(lang === "fr" ? "Connectez d’abord votre compte vidIQ dans le Profil de chaîne." : "Connect your vidIQ account in Channel profile first.");
+    if (value.source.trim().length < 80) return showToast(lang === "fr" ? "Ajoutez au moins 80 caractères de contenu." : "Add at least 80 characters of content.", "warning");
+    if (!profile.vidiqConnected) return showToast(lang === "fr" ? "Connectez d’abord votre compte vidIQ dans le Profil de chaîne." : "Connect your vidIQ account in Channel profile first.", "warning");
     setLoading(true);
     setTimeout(() => { update({ generated: true, thumbnailsGenerated: false, vidiqScores: {}, vidiqStatus: "idle" }); setLoading(false); }, 650);
   };
@@ -798,7 +1066,7 @@ function ExpressPackaging({ value, setValue, profile, lang, copy, showToast }: {
       showToast(lang === "fr" ? "Scores vidIQ synchronisés" : "vidIQ scores synced");
     } catch {
       update({ vidiqStatus: "error" });
-      showToast(lang === "fr" ? "Connexion vidIQ indisponible. Aucun score n’a été estimé." : "vidIQ connection unavailable. No score was estimated.");
+      showToast(lang === "fr" ? "Connexion vidIQ indisponible. Aucun score n’a été estimé." : "vidIQ connection unavailable. No score was estimated.", "error");
     }
   };
   const generateThumbnails = () => {
@@ -833,17 +1101,42 @@ function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, x: number, 
   if (line) ctx.fillText(line.trim(), x, currentY);
 }
 
-function Packaging({ project, updateProject, lang, t, copy }: { project: Project; updateProject: (p: Partial<Project>) => void; lang: Lang; t: (typeof labels)[Lang]; copy: (v: string) => void }) {
-  const a = project.packageAnswers; const setAnswer = (key: keyof typeof a, value: string) => updateProject({ packageAnswers: { ...a, [key]: value } });
-  const complete = a.visual && a.timecodes && a.links;
-  const packs = [
-    { letter: "A", reg: lang === "fr" ? "Bascule émotionnelle" : "Emotional shift", title: lang === "fr" ? "IA sur WhatsApp : arrête de tout faire seul" : "AI on WhatsApp: stop doing everything alone", overlay: "GARDE LE CONTRÔLE", score: 86 },
-    { letter: "B", reg: lang === "fr" ? "Résultat concret" : "Concrete result", title: lang === "fr" ? "Automatiser WhatsApp sans perdre ses clients" : "Automate WhatsApp without losing customers", overlay: "RÉPONDS PLUS VITE", score: 91 },
-    { letter: "C", reg: lang === "fr" ? "Vidéo de référence" : "Reference video", title: lang === "fr" ? "Le guide de l’IA pour WhatsApp Business" : "The guide to AI for WhatsApp Business", overlay: "LE GUIDE", score: 84 },
-  ];
-  return <><StageHead n={7} title={t.steps[6]} desc={lang === "fr" ? "Trois options complètes, prêtes à tester dans YouTube Studio." : "Three complete options, ready to test in YouTube Studio."} />{!complete ? <><div className="stop-banner"><span>Ⅱ</span><div><strong>{lang === "fr" ? "3 réponses obligatoires" : "3 required answers"}</strong><p>{lang === "fr" ? "Aucun concept, timecode, lien ou tarif ne sera inventé." : "No concept, timecode, link or price will be invented."}</p></div></div><div className="question-grid"><Question n="1" label={lang === "fr" ? "Concept visuel retenu" : "Chosen visual concept"} value={a.visual} set={v => setAnswer("visual", v)} placeholder={lang === "fr" ? "Ex. visage surpris à gauche, téléphone à droite" : "E.g. surprised face left, phone right"} /><Question n="2" label={lang === "fr" ? "Timecodes réels" : "Real timecodes"} value={a.timecodes} set={v => setAnswer("timecodes", v)} placeholder="00:00 Intro · 01:15 …" /><Question n="3" label={lang === "fr" ? "Liens et tarifs confirmés" : "Confirmed links and prices"} value={a.links} set={v => setAnswer("links", v)} placeholder={lang === "fr" ? "Collez uniquement les informations confirmées" : "Paste confirmed information only"} /></div></> : <><div className="ab-note">ⓘ {lang === "fr" ? "YouTube ne teste qu’une variable à la fois : titres OU miniatures." : "YouTube tests one variable at a time: titles OR thumbnails."}</div><div className="pack-grid">{packs.map(pack => <div className="pack-card" key={pack.letter}><div className="pack-top"><span>OPTION {pack.letter}</span><small>{pack.reg}</small></div><h3>{pack.title}</h3><div className="score"><span style={{ width: `${pack.score}%` }} /><b>{pack.score}/100</b><small>{lang === "fr" ? "score estimé" : "estimated score"}</small></div><div className="overlay"><small>OVERLAY</small><strong>{pack.overlay}</strong></div><button onClick={() => copy(`${pack.title}\n${pack.overlay}\n${a.visual}\nno text, no watermark`)}>⧉ {t.copy}</button></div>)}</div><div className="publish-section"><h3>{lang === "fr" ? "Checklist de publication" : "Publishing checklist"}</h3>{["Titre", "Description & liens", "Miniature à 120 px", "Chapitres", "Sous-titres", "Commentaire épinglé", "Test A/B", "CTR à 24–48 h"].map(x => <label key={x}><input type="checkbox" />{x}</label>)}</div></>}</>;
+function StudioPackaging({ project, profile, updateProject, lang, t, copy, showToast, aiSettings, referenceThumbnails, openAiSettings, script }: {
+  project: Project; profile: Profile; updateProject: (p: Partial<Project>) => void; lang: Lang; t: (typeof labels)[Lang];
+  copy: (v: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiSettings: AiSettings;
+  referenceThumbnails: ReferenceThumbnail[]; openAiSettings: () => void; script: string;
+}) {
+  const a = project.packageAnswers;
+  const setAnswer = (key: keyof typeof a, value: string) => updateProject({ packageAnswers: { ...a, [key]: value } });
+  const prefilled = useRef(false);
+  // Prefill once, in a single updateProject: two chained setAnswer calls would share the
+  // same stale closure and the second would overwrite the first. Never touches a filled field.
+  useEffect(() => {
+    if (prefilled.current) return;
+    prefilled.current = true;
+    const patch: Partial<typeof a> = {};
+    if (!a.links.trim()) { const links = [profile.contacts, profile.offer].filter(Boolean).join("\n"); if (links) patch.links = links; }
+    if (!a.timecodes.trim()) { const timecodes = estimatedTimecodes(project, profile); if (timecodes) patch.timecodes = timecodes; }
+    if (Object.keys(patch).length) updateProject({ packageAnswers: { ...a, ...patch } });
+  }, [a, project, profile, updateProject]);
+  const complete = Boolean(a.timecodes.trim() && a.links.trim());
+  // The script is rebuilt from the project on every render, so it is never stored twice.
+  const packagingValue: ExpressState = { ...expressDefault, ...(project.packaging ?? {}), inputType: "script", subject: project.subject, source: script };
+  const setPackagingValue = (next: ExpressState) => updateProject({ packaging: { ...next, source: "" } });
+  return <><StageHead n={7} title={t.steps[6]} desc={lang === "fr" ? "Trois options complètes, générées depuis le script validé et prêtes à tester dans YouTube Studio." : "Three complete options, generated from the approved script and ready to test in YouTube Studio."} />
+    {!complete
+      ? <><div className="stop-banner"><span>Ⅱ</span><div><strong>{lang === "fr" ? "2 vérifications obligatoires" : "2 required checks"}</strong><p>{lang === "fr" ? "Pré-rempli depuis votre profil et votre script — vérifiez avant de valider. Aucun tarif ni lien ne sera inventé." : "Pre-filled from your profile and your script — check before approving. No price or link will be invented."}</p></div></div>
+        <div className="question-grid">
+          <Question n="1" label={lang === "fr" ? "Timecodes réels" : "Real timecodes"} help={lang === "fr" ? "Estimés depuis le script — remplacez-les par les timecodes réels après montage, sinon les chapitres YouTube pointeront au mauvais endroit" : "Estimated from the script — replace them with the real timecodes after editing, otherwise the YouTube chapters will point to the wrong place"} value={a.timecodes} set={v => setAnswer("timecodes", v)} placeholder="00:00 Intro · 01:15 …" />
+          <Question n="2" label={lang === "fr" ? "Liens et tarifs confirmés" : "Confirmed links and prices"} help={lang === "fr" ? "Repris de votre Profil de chaîne" : "Taken from your Channel profile"} value={a.links} set={v => setAnswer("links", v)} placeholder={lang === "fr" ? "Collez uniquement les informations confirmées" : "Paste confirmed information only"} />
+          <Question n="3" label={lang === "fr" ? "Concept visuel retenu" : "Chosen visual concept"} optional={lang === "fr" ? "optionnel" : "optional"} help={lang === "fr" ? "Laissez vide pour choisir parmi les concepts proposés par l’IA" : "Leave empty to choose from the concepts proposed by AI"} value={a.visual} set={v => setAnswer("visual", v)} placeholder={lang === "fr" ? "Ex. visage surpris à gauche, téléphone à droite" : "E.g. surprised face left, phone right"} />
+        </div></>
+      : <><div className="ab-note">ⓘ {lang === "fr" ? "YouTube ne teste qu’une variable à la fois : titres OU miniatures." : "YouTube tests one variable at a time: titles OR thumbnails."}</div>
+        <ExpressPackagingAI value={packagingValue} setValue={setPackagingValue} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} referenceThumbnails={referenceThumbnails} openAiSettings={openAiSettings} autoStart={complete} embedded />
+        <div className="publish-section"><h3>{lang === "fr" ? "Checklist de publication" : "Publishing checklist"}</h3>{["Titre", "Description & liens", "Miniature à 120 px", "Chapitres", "Sous-titres", "Commentaire épinglé", "Test A/B", "CTR à 24–48 h"].map(x => <label key={x}><input type="checkbox" />{x}</label>)}</div></>}
+  </>;
 }
-function Question({ n, label, value, set, placeholder }: { n: string; label: string; value: string; set: (v: string) => void; placeholder: string }) { return <label className="question"><span>{n}</span><strong>{label}</strong><textarea value={value} onChange={e => set(e.target.value)} placeholder={placeholder} rows={3} /></label>; }
+function Question({ n, label, value, set, placeholder, help, optional }: { n: string; label: string; value: string; set: (v: string) => void; placeholder: string; help?: string; optional?: string }) { return <label className="question"><span>{n}</span><div className="question-label"><strong>{label}{optional && <i>{optional}</i>}</strong>{help && <small>{help}</small>}</div><textarea value={value} onChange={e => set(e.target.value)} placeholder={placeholder} rows={3} /></label>; }
 
 function Projects({ projects, activeId, lang, t, open, create }: { projects: Project[]; activeId: string; lang: Lang; t: (typeof labels)[Lang]; open: (id: string) => void; create: () => void }) { return <div className="page-view"><div className="page-title"><div><span className="eyebrow">{t.overview}</span><h1>{t.projects}</h1><p>{lang === "fr" ? "Toutes vos vidéos, de l’idée à la publication." : "All your videos, from idea to publication."}</p></div><button className="primary" onClick={create}>＋ {t.newVideo}</button></div><div className="stats"><div><strong>{projects.length}</strong><span>{lang === "fr" ? "projets actifs" : "active projects"}</span></div><div><strong>{projects.filter(p => p.completed.includes(7)).length}</strong><span>{lang === "fr" ? "prêts à publier" : "ready to publish"}</span></div><div><strong>{projects.filter(p => p.status.includes("cours") || p.status.includes("progress")).length}</strong><span>{lang === "fr" ? "scripts en cours" : "scripts in progress"}</span></div></div><div className="project-table"><div className="table-head"><span>{t.project}</span><span>{t.status}</span><span>{t.updated}</span><span /></div>{projects.map(p => <button key={p.id} onClick={() => open(p.id)} className={p.id === activeId ? "current" : ""}><span className="project-name"><i>{p.title.charAt(0)}</i><span><strong>{p.title}</strong><small>{p.subject}</small></span></span><span><b className="status-pill">{p.status}</b></span><span>{p.updated}</span><span>→</span></button>)}</div></div>; }
 
@@ -872,7 +1165,7 @@ async function optimizeReferenceImage(file: File) {
 function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, openRouterModels, referenceThumbnails, reloadReferences, showToast, done }: {
   profile: Profile; setProfile: (p: Profile) => void; lang: Lang; t: (typeof labels)[Lang];
   aiSettings: AiSettings; setAiSettings: (settings: AiSettings) => void; openRouterModels: OpenRouterModel[];
-  referenceThumbnails: ReferenceThumbnail[]; reloadReferences: () => void; showToast: (message: string) => void; done: () => void;
+  referenceThumbnails: ReferenceThumbnail[]; reloadReferences: () => void; showToast: (message: string, kind?: AlertKind) => void; done: () => void;
 }) {
   const field = (key: keyof Profile, value: string | boolean) => setProfile({ ...profile, [key]: value });
   const selectedModel = openRouterModels.find(model => model.id === aiSettings.openrouterModel);
@@ -886,7 +1179,7 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
   const [openRouterKeyStatus, setOpenRouterKeyStatus] = useState<"idle" | "loading" | "valid" | "invalid">("idle");
   const [openRouterKeyLabel, setOpenRouterKeyLabel] = useState("");
   const validateOpenRouterKey = async () => {
-    if (!aiSettings.openrouterKey.trim()) return showToast(lang === "fr" ? "Ajoutez d’abord une clé OpenRouter." : "Add an OpenRouter key first.");
+    if (!aiSettings.openrouterKey.trim()) return showToast(lang === "fr" ? "Ajoutez d’abord une clé OpenRouter." : "Add an OpenRouter key first.", "warning");
     setOpenRouterKeyStatus("loading");
     try {
       const response = await fetch("/api/openrouter-key", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey: aiSettings.openrouterKey }) });
@@ -898,13 +1191,13 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
     } catch {
       setOpenRouterKeyStatus("invalid");
       setOpenRouterKeyLabel("");
-      showToast(lang === "fr" ? "OpenRouter refuse cette clé. Vérifiez-la ou créez-en une nouvelle." : "OpenRouter rejected this key. Check it or create a new one.");
+      showToast(lang === "fr" ? "OpenRouter refuse cette clé. Vérifiez-la ou créez-en une nouvelle." : "OpenRouter rejected this key. Check it or create a new one.", "error");
     }
   };
   const uploadReferences = async (files: FileList | null) => {
     if (!files?.length) return;
     const available = 4 - referenceThumbnails.length;
-    if (available <= 0) return showToast(lang === "fr" ? "Maximum 4 miniatures de référence." : "Maximum 4 reference thumbnails.");
+    if (available <= 0) return showToast(lang === "fr" ? "Maximum 4 miniatures de référence." : "Maximum 4 reference thumbnails.", "warning");
     setUploading(true);
     try {
       const form = new FormData();
@@ -914,7 +1207,7 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
       if (!response.ok) throw new Error(data.error || "upload_failed");
       reloadReferences();
       showToast(lang === "fr" ? "Miniatures de référence ajoutées" : "Reference thumbnails added");
-    } catch (error) { showToast(lang === "fr" ? `Import impossible : ${error instanceof Error ? error.message : "erreur"}` : `Upload failed: ${error instanceof Error ? error.message : "error"}`); }
+    } catch (error) { showToast(lang === "fr" ? `Import impossible : ${error instanceof Error ? error.message : "erreur"}` : `Upload failed: ${error instanceof Error ? error.message : "error"}`, "error"); }
     finally { setUploading(false); }
   };
   const deleteReference = async (reference: ReferenceThumbnail) => {
@@ -922,8 +1215,8 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
     if (response.ok) { reloadReferences(); showToast(lang === "fr" ? "Référence supprimée" : "Reference removed"); }
   };
   const generateEditorialPrompt = async (iterate = false) => {
-    if (!aiSettings.openrouterKey || !aiSettings.visionModel) return showToast(lang === "fr" ? "Ajoutez la clé OpenRouter et choisissez un modèle vision." : "Add an OpenRouter key and choose a vision model.");
-    if (!referenceThumbnails.length) return showToast(lang === "fr" ? "Ajoutez d’abord une miniature de référence." : "Add a reference thumbnail first.");
+    if (!aiSettings.openrouterKey || !aiSettings.visionModel) return showToast(lang === "fr" ? "Ajoutez la clé OpenRouter et choisissez un modèle vision." : "Add an OpenRouter key and choose a vision model.", "warning");
+    if (!referenceThumbnails.length) return showToast(lang === "fr" ? "Ajoutez d’abord une miniature de référence." : "Add a reference thumbnail first.", "warning");
     setStyleLoading(true);
     try {
       const response = await fetch("/api/reference-style", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey: aiSettings.openrouterKey, model: aiSettings.visionModel, referenceKeys: referenceThumbnails.map(reference => reference.key), currentPrompt: iterate ? profile.thumbnailSystemPrompt : "", instruction: iterate ? iteration : "", language: lang, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone } }) });
@@ -932,7 +1225,7 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
       field("thumbnailSystemPrompt", data.prompt);
       setIteration("");
       showToast(iterate ? (lang === "fr" ? "Prompt système amélioré" : "System prompt improved") : (lang === "fr" ? "ADN visuel généré" : "Visual DNA generated"));
-    } catch (error) { showToast(`OpenRouter : ${error instanceof Error ? error.message : "analyse impossible"}`); }
+    } catch (error) { showToast(`OpenRouter : ${error instanceof Error ? error.message : "analyse impossible"}`, "error"); }
     finally { setStyleLoading(false); }
   };
   return <div className="page-view profile-page"><div className="page-title"><div><span className="eyebrow">{lang === "fr" ? "PERSONNALISATION & IA" : "PERSONALIZATION & AI"}</span><h1>{t.channelProfile}</h1><p>{lang === "fr" ? "Configurez les modèles utilisés pour les scripts longs, le packaging et les miniatures." : "Configure the models used for long-form scripts, packaging, and thumbnails."}</p></div><button className="primary" onClick={done}>{t.saveProfile}</button></div>

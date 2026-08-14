@@ -96,8 +96,8 @@ test("wires real AI packaging, long-form writing, key validation, hook iteration
   assert.doesNotMatch(hookRoute, /status: 422/);
   assert.match(chaptersRoute, /reasoning: \{ effort: "high", exclude: true \}/);
   assert.match(chaptersRoute, /youtube_chapter_plan/);
-  assert.match(writeRoute, /youtube_script_body/);
-  assert.match(writeRoute, /body_under_target/);
+  assert.match(writeRoute, /youtube_script_section/);
+  assert.match(writeRoute, /section_under_target/);
   assert.match(writeRoute, /youtube_conclusion/);
   assert.match(studio, /studio-ai-notice/);
   assert.match(studio, /Choisir un autre modèle/);
@@ -159,26 +159,34 @@ test("plans 5-12 chapters with a dedicated high-reasoning model", { concurrency:
   }
 });
 
-test("develops every validated chapter into a long-form body", { concurrency: false }, async () => {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("long-body-test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-  const originalFetch = globalThis.fetch;
-  const chapters = Array.from({ length: 5 }, (_, index) => ({
+function testChapters(count = 5, targetWords = 130) {
+  return Array.from({ length: count }, (_, index) => ({
     id: `chapter-${index + 1}`,
     title: `Partie ${index + 1}`,
     objective: `Expliquer le point ${index + 1}`,
     keyPoints: [`Idée ${index + 1}.1`, `Idée ${index + 1}.2`],
-    targetWords: 130,
+    targetWords,
   }));
-  const scriptPart = Array.from({ length: 120 }, (_, index) => `mot${index + 1}`).join(" ");
+}
+
+function writtenSection(id, words) {
+  return { id, script: Array.from({ length: words }, (_, index) => `mot-${id}-${index + 1}`).join(" "), transition: "Passons au point suivant." };
+}
+
+test("writes exactly one validated chapter per request", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("one-section-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const originalFetch = globalThis.fetch;
+  const chapters = testChapters();
+  const scriptPart = Array.from({ length: 140 }, (_, index) => `mot${index + 1}`).join(" ");
   let calls = 0;
   let sentBody;
   globalThis.fetch = async (input, init) => {
     if (String(input).startsWith("https://openrouter.ai/api/v1/chat/completions")) {
       calls += 1;
       sentBody = JSON.parse(String(init?.body ?? "{}"));
-      return Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ sections: chapters.map(chapter => ({ id: chapter.id, title: chapter.title, script: scriptPart, transition: "Passons maintenant au point suivant." })) }) } }] });
+      return Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ script: scriptPart, transition: "Passons maintenant au point suivant." }) } }] });
     }
     return originalFetch(input, init);
   };
@@ -189,43 +197,68 @@ test("develops every validated chapter into a long-form body", { concurrency: fa
       body: JSON.stringify({
         apiKey: "test-key",
         model: "openai/test-reasoning-model",
-        action: "body",
+        action: "section",
         language: "fr",
         subject: "Expliquer une nouvelle fonctionnalité d’intelligence artificielle",
         duration: "8–12 minutes",
         targetBodyWords: 650,
         chapters,
+        sectionIndex: 2,
+        previousSections: [writtenSection("chapter-1", 130), writtenSection("chapter-2", 130)],
       }),
     }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(calls, 1);
-    assert.equal(payload.result.sections.length, 5);
-    assert.ok(payload.result.wordCount >= 600);
-    assert.match(payload.result.body, /CHAPITRE 5 — PARTIE 5/);
+    assert.equal(payload.result.index, 2);
+    assert.equal(payload.result.section.id, "chapter-3");
+    assert.ok(payload.result.wordCount >= 130);
+    assert.equal(payload.warning, null);
     assert.equal(sentBody.reasoning.effort, "high");
     assert.equal(sentBody.response_format.type, "json_schema");
     assert.equal(sentBody.provider.require_parameters, true);
+    // Per-chapter budget, not the old 16k-48k whole-body budget.
+    assert.ok(sentBody.max_tokens <= 8000);
+    // The chapter heading is inserted by the client, never by the model.
+    assert.doesNotMatch(payload.result.section.script, /CHAPITRE/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("repairs underdeveloped chapters and reports any remaining deficit", { concurrency: false }, async () => {
+test("rejects the retired monolithic body action", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("legacy-action-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).startsWith("https://openrouter.ai/api/v1/chat/completions")) { calls += 1; return Response.json({ choices: [] }); }
+    return originalFetch(input, init);
+  };
+  try {
+    const response = await worker.fetch(new Request("http://localhost/api/studio-write", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ apiKey: "test-key", model: "openai/test-reasoning-model", action: "body", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters: testChapters() }),
+    }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+    const payload = await response.json();
+    assert.equal(response.status, 400);
+    assert.equal(payload.error, "invalid_action");
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("repairs an underdeveloped chapter and reports the remaining deficit", { concurrency: false }, async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("chapter-depth-test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
   const originalFetch = globalThis.fetch;
-  const chapters = Array.from({ length: 5 }, (_, index) => ({
-    id: `chapter-${index + 1}`,
-    title: `Partie ${index + 1}`,
-    objective: `Expliquer le point ${index + 1}`,
-    keyPoints: [`Idée ${index + 1}.1`, `Idée ${index + 1}.2`],
-    targetWords: 130,
-  }));
+  const chapters = testChapters();
   const shortPart = Array.from({ length: 20 }, (_, index) => `mot-court-${index + 1}`).join(" ");
-  const fullPart = Array.from({ length: 145 }, (_, index) => `mot-long-${index + 1}`).join(" ");
-  const content = JSON.stringify({ sections: chapters.map((chapter, index) => ({ id: chapter.id, title: chapter.title, script: index === 0 ? shortPart : fullPart, transition: "Passons au point suivant." })) });
+  const content = JSON.stringify({ script: shortPart, transition: "Passons au point suivant." });
   let calls = 0;
   globalThis.fetch = async (input, init) => {
     if (String(input).startsWith("https://openrouter.ai/api/v1/chat/completions")) {
@@ -238,14 +271,16 @@ test("repairs underdeveloped chapters and reports any remaining deficit", { conc
     const response = await worker.fetch(new Request("http://localhost/api/studio-write", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ apiKey: "test-key", model: "openai/test-reasoning-model", action: "body", language: "fr", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters }),
+      body: JSON.stringify({ apiKey: "test-key", model: "openai/test-reasoning-model", action: "section", language: "fr", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters, sectionIndex: 0, previousSections: [] }),
     }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
     const payload = await response.json();
     assert.equal(response.status, 200);
+    // One primary call plus exactly one repair leg — scoped to this chapter only.
     assert.equal(calls, 2);
-    assert.equal(payload.warning.code, "body_under_target");
-    assert.equal(payload.warning.chapterDeficits.length, 1);
-    assert.equal(payload.warning.chapterDeficits[0].id, "chapter-1");
+    assert.equal(payload.warning.code, "section_under_target");
+    assert.equal(payload.warning.actualWords, 20);
+    assert.equal(payload.warning.targetMinimum, 91);
+    assert.equal(payload.result.section.id, "chapter-1");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -256,7 +291,7 @@ test("does not bill a repair after a provider error embedded in HTTP 200", { con
   workerUrl.searchParams.set("provider-error-test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
   const originalFetch = globalThis.fetch;
-  const chapters = Array.from({ length: 5 }, (_, index) => ({ id: `chapter-${index + 1}`, title: `Partie ${index + 1}`, objective: `Expliquer le point ${index + 1}`, keyPoints: [`Idée ${index + 1}.1`, `Idée ${index + 1}.2`], targetWords: 130 }));
+  const chapters = testChapters();
   let calls = 0;
   globalThis.fetch = async (input, init) => {
     if (String(input).startsWith("https://openrouter.ai/api/v1/chat/completions")) {
@@ -269,7 +304,7 @@ test("does not bill a repair after a provider error embedded in HTTP 200", { con
     const response = await worker.fetch(new Request("http://localhost/api/studio-write", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ apiKey: "test-key", model: "openai/test-reasoning-model", action: "body", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters }),
+      body: JSON.stringify({ apiKey: "test-key", model: "openai/test-reasoning-model", action: "section", subject: "Un sujet long à expliquer", targetBodyWords: 650, chapters, sectionIndex: 0, previousSections: [] }),
     }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
     const payload = await response.json();
     assert.equal(response.status, 502);
@@ -413,4 +448,31 @@ test("reports a provider-output failure instead of mislabelling it as HTTP 422",
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("bounds every AI call and resumes an interrupted body without losing paid chapters", async () => {
+  const [studio, writeRoute, hookRoute, chaptersRoute, packagingRoute, conceptRoute] = await Promise.all([
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/studio-write/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/studio-hook/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/studio-chapters/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/concept-prompt/route.ts", import.meta.url), "utf8"),
+  ]);
+  // Every route that spends money must carry its own deadline.
+  for (const route of [writeRoute, hookRoute, chaptersRoute, packagingRoute, conceptRoute]) {
+    assert.match(route, /AbortSignal\.timeout\(/);
+  }
+  assert.match(writeRoute, /openrouter_timeout/);
+  assert.match(hookRoute, /openrouter_timeout/);
+  assert.match(packagingRoute, /openrouter_timeout/);
+  // Client: retry with backoff, network-failure wording, and chapter-by-chapter resume.
+  assert.match(studio, /postJsonWithRetry/);
+  assert.match(studio, /const RETRY_DELAYS = /);
+  assert.match(studio, /connectionLostMessage/);
+  assert.match(studio, /bodySections/);
+  assert.match(studio, /reprendra au chapitre/);
+  // The assembled heading format is what step 6 and the timecode estimator both parse.
+  assert.match(studio, /CHAPITRE \$\{index \+ 1\} — \$\{chapters\[index\]\.title\.toUpperCase\(\)\}/);
+  assert.match(studio, /project\.body\.split\(\/CHAPITRE\\s\+\\d\+\/i\)/);
 });

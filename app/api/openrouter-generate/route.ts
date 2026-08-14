@@ -64,6 +64,7 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
         max_tokens: 6000,
         response_format: { type: "json_object" },
       }),
+      signal: AbortSignal.timeout(90_000),
     });
     const upstream = await response.json() as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string }; usage?: unknown };
     if (!response.ok) return Response.json({ error: "openrouter_request_failed", detail: upstream.error?.message ?? "Request failed" }, { status: response.status === 401 ? 401 : 502 });
@@ -94,6 +95,8 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
     result.improvedDescription = footer && !generatedDescription.includes(footer) ? `${generatedDescription}\n\n${footer}`.trim() : generatedDescription;
     return Response.json({ result, usage: upstream.usage ?? null });
   } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    if (timedOut) return Response.json({ error: "openrouter_timeout", detail: language === "English" ? "Packaging generation exceeded the allowed time. Regenerate to retry." : "La génération du packaging a dépassé le délai autorisé. Relancez la génération." }, { status: 504 });
     return Response.json({ error: "openrouter_invalid_response", detail: error instanceof Error ? error.message : "Invalid response" }, { status: 502 });
   }
 }

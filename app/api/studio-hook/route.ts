@@ -129,6 +129,7 @@ USER DIRECTION: ${direction || "None"}`;
           response_format: { type: "json_object" },
           plugins: [{ id: "response-healing" }],
         }),
+        signal: AbortSignal.timeout(60_000),
       });
       const upstream = await response.json() as OpenRouterPayload;
       return { response, upstream, content: upstream.choices?.[0]?.message?.content };
@@ -183,6 +184,8 @@ USER DIRECTION: ${direction || "None"}`;
     };
     return Response.json({ result: { hook: parsed.hook.trim(), promise: parsed.promise.trim() }, warning, usage: completion.upstream.usage ?? null });
   } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    if (timedOut) return Response.json({ error: "openrouter_timeout", detail: language === "English" ? "Hook generation exceeded the allowed time. Retry." : "La génération du hook a dépassé le délai autorisé. Réessayez." }, { status: 504 });
     return Response.json({ error: "openrouter_invalid_response", detail: error instanceof Error ? error.message : "Invalid response" }, { status: 502 });
   }
 }
