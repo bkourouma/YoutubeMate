@@ -55,6 +55,9 @@
 .pipeline-shorts .shorts-section-head > button { border:1px solid var(--line); border-radius:7px; background:#fff; color:#4f5f57; padding:9px 12px; font-size:9px; font-weight:700; white-space:nowrap; }
 
 .pipeline-shorts .shorts-field span { display:block; font-size:9px; font-weight:700; color:#64736b; margin-bottom:6px; }
+.pipeline-shorts .shorts-field input { width:100%; border:1px solid #d7ded9; border-radius:8px; padding:11px; font-size:11px; outline:0; color:#283830; }
+.pipeline-shorts .shorts-field input:focus { border-color:var(--accent); box-shadow:0 0 0 3px #6557e81f; }
+.pipeline-shorts .shorts-field + .shorts-field { margin-top:14px; display:block; }
 .pipeline-shorts .shorts-field textarea { width:100%; border:1px solid #d7ded9; border-radius:8px; padding:11px; font-size:11px; line-height:1.55; outline:0; resize:vertical; color:#283830; }
 .pipeline-shorts .shorts-field textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px #6557e81f; }
 .pipeline-shorts .shorts-field em { display:block; margin-top:6px; color:#8b968f; font-size:8px; font-style:normal; }

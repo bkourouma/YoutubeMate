@@ -3,9 +3,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ShortsStudio } from "./shorts-studio";
+import { ShortsExpress } from "./shorts-express";
 
 type Lang = "fr" | "en";
-type View = "studio" | "shorts" | "express" | "projects" | "profile";
+type View = "studio" | "shorts" | "express" | "shorts-express" | "projects" | "profile";
 type StepState = "done" | "active" | "todo";
 type HookIterationTarget = "hook" | "promise" | "both";
 type NoticeKind = "warning" | "error";
@@ -117,11 +118,11 @@ const demoProjects: Project[] = [
 
 const labels = {
   fr: {
-    projects: "Projets", studio: "Script Studio", shorts: "Shorts Studio", soon: "bientôt", express: "Packaging express", profile: "Profil & paramètres", newVideo: "Nouvelle vidéo", pilot: "Pilote automatique", saved: "Sauvegardé à l’instant", steps: ["Recherche & angle", "Hook & intro", "Validation des chapitres", "Corps du script", "Conclusion & CTA", "Relecture finale", "Packaging"],
+    projects: "Projets", studio: "Script Studio", shorts: "Shorts Studio", soon: "bientôt", express: "Packaging express · 16:9", shortsExpress: "Publication express · Shorts", profile: "Profil & paramètres", newVideo: "Nouvelle vidéo", pilot: "Pilote automatique", saved: "Sauvegardé à l’instant", steps: ["Recherche & angle", "Hook & intro", "Validation des chapitres", "Corps du script", "Conclusion & CTA", "Relecture finale", "Packaging"],
     validate: "Valider l’étape", regenerate: "Régénérer", edit: "Modifier", copy: "Copier", words: "mots", seconds: "secondes", guard: "Garde-fous actifs", facts: "Aucune donnée inventée", fixed: "Textes fixes protégés", oral: "Écriture orale", sources: "Sources vérifiées uniquement", project: "Projet", script: "Prompteur", export: "Exporter", allProjects: "Tous les projets", continue: "Continuer", recent: "Projets récents", channelProfile: "Profil de chaîne", integrations: "Intégrations personnelles", connected: "Connecté", disconnected: "Non connecté", test: "Tester la connexion", disconnect: "Déconnecter", saveProfile: "Enregistrer le profil", primaryLang: "Langue principale", secondaryLang: "Langue secondaire", fixedText: "Textes fixes — protégés mot pour mot", audience: "Audience cible", tone: "Ton & style", duration: "Durée cible", close: "Fermer", download: "Télécharger le document", copyScript: "Copier le script", fullScreen: "Plein écran", back: "Retour au studio", status: "Statut", updated: "Dernière modification", noKey: "Recherche manuelle disponible", ready: "Prêt à tourner", mandatoryStop: "Arrêt obligatoire", answerToContinue: "Votre réponse est requise pour continuer.", launch: "Lancer la génération", overview: "Vue d’ensemble", addSubject: "Quel est le sujet exact de la vidéo ?", create: "Créer le projet", cancel: "Annuler"
   },
   en: {
-    projects: "Projects", studio: "Script Studio", shorts: "Shorts Studio", soon: "soon", express: "Express packaging", profile: "Profile & settings", newVideo: "New video", pilot: "Autopilot", saved: "Saved just now", steps: ["Research & angle", "Hook & intro", "Chapter validation", "Script body", "Conclusion & CTA", "Final review", "Packaging"],
+    projects: "Projects", studio: "Script Studio", shorts: "Shorts Studio", soon: "soon", express: "Express packaging · 16:9", shortsExpress: "Express publishing · Shorts", profile: "Profile & settings", newVideo: "New video", pilot: "Autopilot", saved: "Saved just now", steps: ["Research & angle", "Hook & intro", "Chapter validation", "Script body", "Conclusion & CTA", "Final review", "Packaging"],
     validate: "Approve step", regenerate: "Regenerate", edit: "Edit", copy: "Copy", words: "words", seconds: "seconds", guard: "Guardrails active", facts: "No invented data", fixed: "Fixed copy protected", oral: "Written for speech", sources: "Verified sources only", project: "Project", script: "Teleprompter", export: "Export", allProjects: "All projects", continue: "Continue", recent: "Recent projects", channelProfile: "Channel profile", integrations: "Personal integrations", connected: "Connected", disconnected: "Not connected", test: "Test connection", disconnect: "Disconnect", saveProfile: "Save profile", primaryLang: "Primary language", secondaryLang: "Secondary language", fixedText: "Fixed copy — protected word for word", audience: "Target audience", tone: "Tone & style", duration: "Target duration", close: "Close", download: "Download document", copyScript: "Copy script", fullScreen: "Full screen", back: "Back to studio", status: "Status", updated: "Last updated", noKey: "Manual research available", ready: "Ready to record", mandatoryStop: "Mandatory stop", answerToContinue: "Your answer is required to continue.", launch: "Start generation", overview: "Overview", addSubject: "What is the exact video topic?", create: "Create project", cancel: "Cancel"
   },
 };
@@ -739,6 +740,7 @@ export default function ScriptStudio() {
           <NavButton active={view === "studio"} icon="◫" label={t.studio} onClick={() => setView("studio")} />
           <NavButton active={view === "express"} icon="✦" label={t.express} onClick={() => setView("express")} />
           <NavButton active={view === "shorts"} icon="▶" label={t.shorts} onClick={() => setView("shorts")} />
+          <NavButton active={view === "shorts-express"} icon="⚡" label={t.shortsExpress} onClick={() => setView("shorts-express")} />
           <NavButton active={view === "projects"} icon="▤" label={t.projects} count={projects.length} onClick={() => setView("projects")} />
           <NavButton active={view === "profile"} icon="◉" label={t.profile} onClick={() => setView("profile")} />
         </nav>
@@ -770,6 +772,7 @@ export default function ScriptStudio() {
           </div>
         </>}
         {view === "shorts" && <ShortsStudio lang={lang} openrouterReady={integrations.openrouter.configured} openaiReady={integrations.openai.configured} writerModel={aiSettings.writerModel} imageModel={aiSettings.imageModel} imageQuality={aiSettings.imageQuality} channel={profile.channel} thumbnailSystemPrompt={profile.thumbnailSystemPrompt ?? ""} referenceKeys={referenceThumbnails.map(reference => reference.key)} presenterKey={presenterPhoto?.key ?? ""} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
+        {view === "shorts-express" && <ShortsExpress lang={lang} openrouterReady={integrations.openrouter.configured} openaiReady={integrations.openai.configured} writerModel={aiSettings.writerModel} imageModel={aiSettings.imageModel} imageQuality={aiSettings.imageQuality} channel={profile.channel} thumbnailSystemPrompt={profile.thumbnailSystemPrompt ?? ""} referenceKeys={referenceThumbnails.map(reference => reference.key)} presenterKey={presenterPhoto?.key ?? ""} profile={{ channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, descriptionFooter: profile.descriptionFooter }} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
         {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterPhoto?.key ?? ""} openAiSettings={() => setView("profile")} />}
         {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} youtube={youtube} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} presenterPhoto={presenterPhoto} reloadPresenter={loadPresenterPhoto} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}

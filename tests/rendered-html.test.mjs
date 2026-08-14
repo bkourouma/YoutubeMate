@@ -491,6 +491,31 @@ test("ports the Shorts data routes with identity, caps and its cue logic intact"
   assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
 });
 
+test("packages already-edited shorts without a transcript", async () => {
+  const [express, route, studio] = await Promise.all([
+    readFile(new URL("../app/shorts-express.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shorts-express/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+  ]);
+  // Two express entries, each naming its format so they cannot be confused.
+  assert.match(studio, /Packaging express · 16:9/);
+  assert.match(studio, /Publication express · Shorts/);
+  assert.match(studio, /<ShortsExpress lang=\{lang\}/);
+  // Bulk runs sequentially: ten parallel calls would spike the provider rate limit.
+  assert.match(express, /for \(const \[index, title\] of titles\.entries\(\)\)/);
+  assert.match(express, /const bestOf = /);
+  // The hashtag suffix is editable, not hard-coded into every title.
+  assert.match(express, /const \[suffix, setSuffix\] = useState\(DEFAULT_SUFFIX\)/);
+  // Shorts thumbnails, not landscape ones.
+  assert.match(express, /pipeline: "shorts"/);
+  assert.match(express, /canvas\.width = 720; canvas\.height = 1280;/);
+  // Same guarantees as every other paid route.
+  assert.match(route, /requireApiKey\("openrouter"\)/);
+  assert.match(route, /makeCacheKey\("shorts-express-v1", userId/);
+  assert.match(route, /validPackage/);
+  assert.doesNotMatch(route, /apiKey\?: string/);
+});
+
 test("builds a CapCut kit that carries the cut plan and the CTA clip", async () => {
   const [kit, shorts, packageJson] = await Promise.all([
     readFile(new URL("../app/lib/capcut-kit.ts", import.meta.url), "utf8"),
