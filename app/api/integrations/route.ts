@@ -1,5 +1,6 @@
 import { withUser } from "../../server/identity";
 import { fetchUpstream, isTimeout, openRouterHeaders } from "../../server/http";
+import { disconnectYoutube, youtubeStatus } from "../../server/youtube";
 import {
   deleteIntegrationSecret, integrationErrorResponse, integrationStatus,
   isIntegrationService, normalizeApiKey, saveIntegrationSecret, type IntegrationService,
@@ -26,7 +27,7 @@ async function validateSecret(service: IntegrationService, apiKey: string) {
 export async function GET() {
   return withUser(async userId => {
     try {
-      return Response.json({ integrations: await integrationStatus(userId) });
+      return Response.json({ integrations: await integrationStatus(userId), youtube: await youtubeStatus(userId) });
     } catch (error) {
       return integrationErrorResponse(error) ?? Response.json({ error: "integration_status_unavailable" }, { status: 503 });
     }
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
       const check = await validateSecret(body.service, value);
       if (!check.valid) return Response.json({ error: "secret_rejected", service: body.service }, { status: 400 });
       await saveIntegrationSecret(userId, body.service, value);
-      return Response.json({ ok: true, label: "label" in check ? check.label : undefined, integrations: await integrationStatus(userId) });
+      return Response.json({ ok: true, label: "label" in check ? check.label : undefined, integrations: await integrationStatus(userId), youtube: await youtubeStatus(userId) });
     } catch (error) {
       if (isTimeout(error)) return Response.json({ error: "validation_timeout", service: body.service }, { status: 504 });
       return integrationErrorResponse(error) ?? Response.json({ error: "secret_save_failed" }, { status: 502 });
@@ -57,10 +58,18 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   return withUser(async userId => {
     const service = new URL(request.url).searchParams.get("service");
+    if (service === "youtube") {
+      try {
+        await disconnectYoutube(userId);
+        return Response.json({ ok: true, integrations: await integrationStatus(userId), youtube: await youtubeStatus(userId) });
+      } catch {
+        return Response.json({ error: "youtube_disconnect_failed" }, { status: 502 });
+      }
+    }
     if (!isIntegrationService(service)) return Response.json({ error: "unknown_service" }, { status: 400 });
     try {
       await deleteIntegrationSecret(userId, service);
-      return Response.json({ ok: true, integrations: await integrationStatus(userId) });
+      return Response.json({ ok: true, integrations: await integrationStatus(userId), youtube: await youtubeStatus(userId) });
     } catch (error) {
       return integrationErrorResponse(error) ?? Response.json({ error: "secret_delete_failed" }, { status: 502 });
     }

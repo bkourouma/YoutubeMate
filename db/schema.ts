@@ -29,6 +29,27 @@ export const aiCache = sqliteTable("ai_cache", {
   createdAt: text("created_at").notNull(),
 }, table => [index("idx_ai_cache_user_created").on(table.userId, table.createdAt)]);
 
+// One YouTube connection per user, refresh token encrypted like every other secret.
+// The original stored a single global row (id = 1) in plaintext, so any visitor who
+// completed the OAuth flow repointed everyone's uploads at their own channel.
+export const youtubeAuth = sqliteTable("youtube_auth", {
+  userId: text("user_id").primaryKey(),
+  refreshTokenEncrypted: text("refresh_token_encrypted").notNull(),
+  iv: text("iv").notNull(),
+  channelName: text("channel_name"),
+  channelId: text("channel_id"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// Single-use OAuth state bound to the user who started the flow. Replaces a substring
+// test on the raw Cookie header, which any cookie containing the state value satisfied.
+export const oauthStates = sqliteTable("oauth_states", {
+  state: text("state").primaryKey(),
+  userId: text("user_id").notNull(),
+  provider: text("provider").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 // One row per Shorts project. Kept out of the workspaces blob on purpose: a single
 // Shorts state (transcript + up to 50 excerpts + titles + metadata) can exceed the
 // 900 KB cap that guards the whole workspace, which is rewritten on every keystroke.

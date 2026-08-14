@@ -491,6 +491,36 @@ test("ports the Shorts data routes with identity, caps and its cue logic intact"
   assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
 });
 
+test("binds the YouTube connection to one account and to a single-use state", async () => {
+  const [auth, callback, helper, schema] = await Promise.all([
+    readFile(new URL("../app/api/youtube/auth/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/youtube/callback/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/youtube.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+  ]);
+  // Starting the flow anonymously let anyone complete it and take over the connection.
+  assert.match(auth, /requireUserId\(\)/);
+  // The original checked the state with a substring test on the raw Cookie header, so
+  // any cookie whose value contained that text passed. Strip comments first: this file
+  // quotes the old vulnerable line to explain why it was replaced.
+  const callbackCode = callback.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(callbackCode, /headers\.get\(\s*["']cookie["']\s*\)/i);
+  assert.doesNotMatch(callbackCode, /cookie\w*\.includes\(/i);
+  assert.match(callback, /consumeOAuthState\(state\)/);
+  assert.match(helper, /delete\(oauthStates\)\.where\(eq\(oauthStates\.state, state\)\)/);
+  // A refused consent used to fall through to a bare 400.
+  assert.match(callback, /parameters\.get\("error"\)/);
+  // One row per user, token encrypted, and no request-Host-derived redirect URI.
+  assert.match(schema, /userId: text\("user_id"\)\.primaryKey\(\)/);
+  assert.match(schema, /refreshTokenEncrypted/);
+  assert.doesNotMatch(schema, /refresh_token"\)\.notNull/);
+  assert.match(helper, /PUBLIC_APP_ORIGIN/);
+  assert.match(helper, /additionalData\(userId\)/);
+  // Upload is the only scope this app ever needs.
+  assert.match(helper, /youtube\.upload/);
+  assert.doesNotMatch(helper, /youtube\.readonly|youtube\.force-ssl/);
+});
+
 test("renders the Shorts pipeline inside the shared shell", async () => {
   const [shorts, studio] = await Promise.all([
     readFile(new URL("../app/shorts-studio.tsx", import.meta.url), "utf8"),

@@ -63,6 +63,7 @@ type AiSettings = {
 type IntegrationService = "openrouter" | "openai" | "descript";
 type IntegrationState = { configured: boolean; source: "user" | "environment" | "none"; last4: string; updatedAt: string | null };
 type Integrations = Record<IntegrationService, IntegrationState>;
+type YoutubeState = { connected: boolean; channelName: string | null; updatedAt: string | null };
 
 const emptyIntegrations: Integrations = {
   openrouter: { configured: false, source: "none", last4: "", updatedAt: null },
@@ -288,6 +289,7 @@ export default function ScriptStudio() {
   const [express, setExpress] = useState<ExpressState>(expressDefault);
   const [aiSettings, setAiSettings] = useState<AiSettings>({ openrouterModel: "", writerModel: "", visionModel: "", imageModel: "gpt-image-2", imageQuality: "medium" });
   const [integrations, setIntegrations] = useState<Integrations>(emptyIntegrations);
+  const [youtube, setYoutube] = useState<YoutubeState>({ connected: false, channelName: null, updatedAt: null });
   const [legacyKeysFound, setLegacyKeysFound] = useState(false);
   const [credentialsHydrated, setCredentialsHydrated] = useState(false);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
@@ -353,11 +355,12 @@ export default function ScriptStudio() {
   }, []);
 
   const refreshIntegrations = useCallback(() => {
-    fetch("/api/integrations").then(response => response.json() as Promise<{ integrations?: Integrations }>)
-      .then(data => { if (data.integrations) setIntegrations(data.integrations); }).catch(() => null);
+    fetch("/api/integrations").then(response => response.json() as Promise<{ integrations?: Integrations; youtube?: YoutubeState }>)
+      .then(data => { if (data.integrations) setIntegrations(data.integrations); if (data.youtube) setYoutube(data.youtube); }).catch(() => null);
   }, []);
 
   useEffect(() => { refreshIntegrations(); }, [refreshIntegrations]);
+
 
   useEffect(() => {
     fetch("/api/openrouter-models").then(response => response.json() as Promise<{ models?: OpenRouterModel[] }>).then(data => {
@@ -449,6 +452,25 @@ export default function ScriptStudio() {
   };
   const dismissAlert = (id: string) => setAlerts(current => current.filter(alert => alert.id !== id));
   const copy = async (value: string) => { await navigator.clipboard.writeText(value); showToast(lang === "fr" ? "Copié dans le presse-papiers" : "Copied to clipboard"); };
+
+  // Google redirects back with ?youtube=…; report the outcome and drop it from the URL.
+  useEffect(() => {
+    const status = new URLSearchParams(window.location.search).get("youtube");
+    if (!status) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    const messages: Record<string, [string, AlertKind]> = {
+      connected: [lang === "fr" ? "Chaîne YouTube connectée" : "YouTube channel connected", "success"],
+      refused: [lang === "fr" ? "Autorisation YouTube refusée." : "YouTube authorisation refused.", "warning"],
+      expired: [lang === "fr" ? "La demande de connexion a expiré. Relancez-la." : "The connection request expired. Start it again.", "warning"],
+      invalid: [lang === "fr" ? "Réponse de connexion incomplète." : "Incomplete connection response.", "error"],
+      failed: [lang === "fr" ? "La connexion YouTube a échoué." : "YouTube connection failed.", "error"],
+    };
+    const [message, kind] = messages[status] ?? messages.failed;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    showToast(message, kind);
+    refreshIntegrations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const closingAlreadyIncluded = Boolean(profile.closing.trim() && project.conclusion.includes(profile.closing.trim()));
   const script = [project.hook, profile.presentation, project.promise, profile.launch, project.body, project.conclusion, closingAlreadyIncluded ? "" : profile.closing].filter(Boolean).join("\n\n");
 
@@ -743,7 +765,7 @@ export default function ScriptStudio() {
         {view === "shorts" && <ShortsStudio lang={lang} openrouterReady={integrations.openrouter.configured} writerModel={aiSettings.writerModel} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
         {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} openAiSettings={() => setView("profile")} />}
-        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
+        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} youtube={youtube} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
       </main>
       {newOpen && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title"><button className="modal-close" onClick={() => setNewOpen(false)}>×</button><span className="eyebrow">{lang === "fr" ? "NOUVEAU PROJET" : "NEW PROJECT"}</span><h2 id="new-project-title">{t.addSubject}</h2><p>{lang === "fr" ? "Soyez précis : le studio ne recherchera jamais une catégorie plus large." : "Be specific: the studio will never research a broader category."}</p><textarea value={newSubject} maxLength={2000} onChange={e => setNewSubject(e.target.value)} placeholder={lang === "fr" ? "Ex. Comment utiliser l’IA pour répondre aux clients sur WhatsApp Business" : "E.g. How to use AI to answer customers on WhatsApp Business"} /><div className="modal-actions"><button className="ghost" onClick={() => setNewOpen(false)}>{t.cancel}</button><button className="primary" onClick={createProject}>{t.create} →</button></div></div></div>}
       {alerts.length > 0 && <div className="alert-stack" aria-live="polite" aria-relevant="additions" onMouseEnter={() => setAlertsPaused(true)} onMouseLeave={() => setAlertsPaused(false)} onFocusCapture={() => setAlertsPaused(true)} onBlurCapture={() => setAlertsPaused(false)}>
@@ -1176,9 +1198,9 @@ async function optimizeReferenceImage(file: File) {
   } catch { return file; }
 }
 
-function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, integrations, refreshIntegrations, legacyKeysFound, clearLegacyKeys, openRouterModels, referenceThumbnails, reloadReferences, showToast, done }: {
+function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, integrations, youtube, refreshIntegrations, legacyKeysFound, clearLegacyKeys, openRouterModels, referenceThumbnails, reloadReferences, showToast, done }: {
   profile: Profile; setProfile: (p: Profile) => void; lang: Lang; t: (typeof labels)[Lang];
-  aiSettings: AiSettings; setAiSettings: (settings: AiSettings) => void; integrations: Integrations; refreshIntegrations: () => void; legacyKeysFound: boolean; clearLegacyKeys: () => void; openRouterModels: OpenRouterModel[];
+  aiSettings: AiSettings; setAiSettings: (settings: AiSettings) => void; integrations: Integrations; youtube: YoutubeState; refreshIntegrations: () => void; legacyKeysFound: boolean; clearLegacyKeys: () => void; openRouterModels: OpenRouterModel[];
   referenceThumbnails: ReferenceThumbnail[]; reloadReferences: () => void; showToast: (message: string, kind?: AlertKind) => void; done: () => void;
 }) {
   const field = (key: keyof Profile, value: string | boolean) => setProfile({ ...profile, [key]: value });
@@ -1217,15 +1239,17 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
       showToast(reason, "error");
     } finally { setSecretBusy(null); }
   };
-  const removeSecret = async (service: IntegrationService) => {
-    setSecretBusy(service);
+  const removeSecret = async (service: IntegrationService | "youtube") => {
+    setSecretBusy(service === "youtube" ? null : service);
     try {
       const response = await fetch(`/api/integrations?service=${service}`, { method: "DELETE" });
       if (!response.ok) throw new Error("delete_failed");
       refreshIntegrations();
-      showToast(lang === "fr" ? `Clé ${serviceLabels[service].name} supprimée` : `${serviceLabels[service].name} key removed`);
+      showToast(service === "youtube"
+        ? (lang === "fr" ? "Chaîne YouTube déconnectée" : "YouTube channel disconnected")
+        : (lang === "fr" ? `Clé ${serviceLabels[service].name} supprimée` : `${serviceLabels[service].name} key removed`));
     } catch {
-      showToast(lang === "fr" ? "Suppression impossible." : "Could not remove the key.", "error");
+      showToast(lang === "fr" ? "Suppression impossible." : "Could not remove the connection.", "error");
     } finally { setSecretBusy(null); }
   };
   const uploadReferences = async (files: FileList | null) => {
@@ -1283,6 +1307,19 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
             </div>
           </div>;
         })}
+        <div className="credential-card youtube-card">
+          <span className="provider-mark youtube-mark">YT</span>
+          <strong>YouTube</strong><small>{lang === "fr" ? "Envoi des vidéos vers votre chaîne, en privé" : "Uploads videos to your channel, privately"}</small>
+          <div className="credential-status-row">
+            <em className={youtube.connected ? "present" : ""}>● {youtube.connected
+              ? `${lang === "fr" ? "Chaîne connectée" : "Channel connected"}${youtube.channelName ? ` · ${youtube.channelName}` : ""}`
+              : (lang === "fr" ? "Non connectée" : "Not connected")}</em>
+            {youtube.connected
+              ? <button type="button" className="danger" onClick={() => removeSecret("youtube")}>{lang === "fr" ? "Déconnecter" : "Disconnect"}</button>
+              : <a className="connect-link" href="/api/youtube/auth">{lang === "fr" ? "Connecter YouTube" : "Connect YouTube"} →</a>}
+          </div>
+          <p className="credential-note">{lang === "fr" ? "L’autorisation passe par la page sécurisée de Google. YoutubeMate ne reçoit jamais votre mot de passe, et demande uniquement le droit d’envoyer des vidéos." : "Authorisation happens on Google’s own page. YoutubeMate never sees your password, and only requests the right to upload videos."}</p>
+        </div>
       </div>
       <div className="model-grid">
         <label className="writer-model-field"><span>{lang === "fr" ? "Scénarisation longue — modèle thinking" : "Long-form writing — thinking model"}</span><select value={aiSettings.writerModel} onChange={event => setAiSettings({ ...aiSettings, writerModel: event.target.value })}><option value="">{writerModels.length ? (lang === "fr" ? "Choisir un modèle puissant" : "Choose a powerful model") : (lang === "fr" ? "Aucun modèle thinking compatible" : "No compatible thinking model")}</option>{writerModels.map(model => <option key={model.id} value={model.id}>{model.id === "openai/gpt-5.6-sol" ? "★ " : ""}{model.name} · in {formatTokenPrice(model.inputPerToken)}/M · out {formatTokenPrice(model.outputPerToken)}/M</option>)}</select>{selectedWriterModel && <small><strong>{selectedWriterModel.id === "openai/gpt-5.6-sol" ? (lang === "fr" ? "Recommandé pour les scripts longs" : "Recommended for long-form scripts") : (lang === "fr" ? "Compatible scripts longs" : "Long-form compatible")}</strong> · {selectedWriterModel.contextLength ? `${Math.round(selectedWriterModel.contextLength / 1000)}k context` : "context n/a"} · {lang === "fr" ? "réflexion élevée activée automatiquement" : "high reasoning enabled automatically"}</small>}<em>{lang === "fr" ? "La réflexion consomme des jetons de sortie : le coût final dépend du raisonnement et de la longueur du script." : "Reasoning uses output tokens: final cost depends on thinking and script length."}</em></label>
