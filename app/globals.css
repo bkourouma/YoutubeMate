@@ -262,6 +262,16 @@ button { cursor:pointer; }
 .credential-card .connect-link { border:1px solid var(--line); border-radius:6px; background:#fff; color:#4f5f57; padding:7px 10px; font-size:8px; font-weight:750; text-decoration:none; white-space:nowrap; }
 .credential-card .connect-link:hover { border-color:var(--green); color:var(--green); }
 .credential-note { margin:9px 0 0; color:#8b968f; font-size:8px; line-height:1.5; }
+.presenter-row { display:grid; grid-template-columns:120px minmax(0,1fr); gap:16px; align-items:start; }
+.presenter-preview { width:120px; aspect-ratio:3/4; object-fit:cover; border-radius:9px; border:1px solid var(--line); background:#f3f7f4; }
+.presenter-empty { width:120px; aspect-ratio:3/4; display:grid; place-items:center; border:1px dashed #c9d3cd; border-radius:9px; color:#9aa5a0; font-size:8px; background:#fafbfa; }
+.presenter-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.presenter-actions p { flex-basis:100%; margin:2px 0 0; color:#8b968f; font-size:8px; line-height:1.55; }
+.presenter-upload { border:1px solid var(--line); border-radius:7px; background:#fff; color:#4f5f57; padding:9px 12px; font-size:9px; font-weight:700; cursor:pointer; }
+.presenter-upload:hover { border-color:var(--green); color:var(--green); }
+.presenter-upload input { display:none; }
+.presenter-actions button.danger { border:1px solid #e0aaa2; border-radius:7px; background:#fff; color:#8d2f2f; padding:9px 12px; font-size:9px; font-weight:700; }
+@media (max-width:650px) { .presenter-row { grid-template-columns:1fr; } }
 .credential-status-row button.danger { border-color:#e0aaa2; color:#8d2f2f; }
 .credential-status-row button.danger:hover { background:#fff3f1; }
 @media (max-width:650px) { .legacy-keys-banner { grid-template-columns:24px minmax(0,1fr); }.legacy-keys-banner button { grid-column:2; justify-self:start; } }

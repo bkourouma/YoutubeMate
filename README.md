@@ -1,143 +1,73 @@
-# Script Studio
+# YoutubeMate
 
-Application bilingue de production éditoriale YouTube : recherche et angle,
-hook, corps du script, conclusion, relecture et packaging. Les projets et le
-profil de chaîne sont sauvegardés par utilisateur.
+Un seul atelier pour deux formats YouTube, avec une base, un profil et un jeu de clés.
 
-## Packaging assisté par IA
+- **Script Studio** — d'un sujet à un script long prêt à tourner, puis à son packaging : recherche et angle, hook et intro, plan de chapitres, corps du script, conclusion, relecture, packaging.
+- **Shorts Studio** — d'une vidéo longue à une série de shorts : transcription, extraits autonomes avec leurs timecodes source exacts, titres, fiches YouTube, miniatures verticales, production dans Descript et envoi vers YouTube.
 
-- OpenRouter génère les 3 paires titre/description, 9 concepts de miniature,
-  les tags, la description améliorée et 5 quiz à trois choix lorsqu'un script
-  est fourni.
-- Le profil permet d'enregistrer un bloc de coordonnées, liens ou appel à
-  l'action. Il est ajouté automatiquement, mot pour mot, à chaque description.
-- Après synchronisation vidIQ, le titre et la description de l'option la mieux
-  notée sont également présentés en anglais et prêts à copier.
-- Chaque packaging inclut un commentaire épinglé conçu pour lancer une
-  discussion naturelle sous la vidéo.
-- Le catalogue de modèles OpenRouter et ses prix entrée/sortie sont récupérés
-  en direct depuis l'API officielle.
-- OpenAI Images génère les trois miniatures choisies, téléchargeables en PNG
-  1280 × 720.
-- Le profil accepte jusqu'à 4 miniatures de référence stockées dans l'espace
-  privé. Un modèle vision OpenRouter les transforme en prompt système éditorial
-  que l'utilisateur peut modifier ou améliorer par itérations.
-- Les références et le prompt système sont appliqués automatiquement aux
-  générations OpenAI suivantes.
-- Par défaut, les clés OpenRouter et OpenAI restent uniquement dans la mémoire
-  de l'onglet. L'utilisateur peut choisir de les mémoriser dans le stockage
-  local de son navigateur personnel ; elles ne sont jamais ajoutées au
-  workspace ni à D1.
-- Le profil peut vérifier une clé OpenRouter sans lancer de génération et
-  signale clairement une clé refusée ou expirée.
-- Les scores de titre sont relayés depuis vidIQ sans estimation locale.
+Les deux pipelines partagent l'identité, le profil éditorial, les clés API, les modèles, les miniatures de référence et la photo du présentateur.
 
-## Hook et introduction assistés par IA
+## Principes
 
-- À l'étape « Hook & intro », OpenRouter génère réellement le hook et la
-  promesse à partir du sujet, de l'audience et du ton de la chaîne.
-- L'utilisateur peut cibler le hook, la promesse ou les deux, puis donner des
-  orientations libres ou utiliser des suggestions rapides avant de relancer
-  l'IA. Les textes fixes du profil restent inchangés.
-- Si un modèle ne respecte pas le format ou la longueur demandés, le studio lui
-  soumet automatiquement une seconde passe de correction avant d'afficher une
-  erreur explicite.
+**Rien n'est inventé.** Les garde-fous du studio interdisent les chiffres, sources et promesses absents du contexte fourni. Les textes fixes de la chaîne (présentation, lancement, clôture) sont reproduits mot pour mot. Les scores de titres sont annoncés comme des estimations éditoriales de l'IA, jamais comme des données vidIQ.
 
-## Développement
+**Rien n'est perdu.** Chaque génération longue avance par morceaux et persiste au fur et à mesure : un chapitre, un short, un envoi. Une coupure ne coûte que l'élément en cours, et relancer reprend au premier manquant — jamais de régénération de travail déjà payé.
 
-Le projet fonctionne sur vinext avec une base Cloudflare D1 pour la persistance.
+**Rien n'est dépensé sans intention.** Les concepts de miniature sont gratuits ; une seule image est produite après votre choix. Les résultats d'analyse, de titres et de fiches sont mis en cache par utilisateur.
 
-## Prerequisites
-
-- Node.js `>=22.13.0`
-
-## Quick Start
+## Démarrage
 
 ```bash
 npm install
-npm run dev
-npm run build
+cp .env.example .env      # puis remplir (voir ci-dessous)
+npx vinext dev --port 3100
+node scripts/apply-local-migrations.mjs   # une fois, après le premier démarrage
 ```
 
-This starter does not use `wrangler.jsonc`.
+Les scripts `npm run dev` / `build` utilisent une syntaxe POSIX qui échoue sous Windows ; appelez `npx vinext …` directement.
 
-## Included Shape
+### Variables d'environnement
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+| Variable | Rôle |
+|---|---|
+| `SETTINGS_ENCRYPTION_KEY` | **Obligatoire.** Chiffre les clés API en base (AES-GCM). Ne jamais la changer après coup : les clés deviendraient illisibles. |
+| `DEV_USER_ID` | Développement local uniquement — tient lieu d'en-tête d'identité. **Doit rester absente en production**, sinon tout visiteur anonyme hérite de cette identité et donc de vos clés. |
+| `ADMIN_USER_ID` | Facultatif. Autorise cet utilisateur à utiliser les clés serveur en secours. |
+| `ALLOWED_USER_IDS` | Facultatif. Restreint l'application à une liste d'identifiants. |
+| `PUBLIC_APP_ORIGIN` | Origine publique, obligatoire en production. Sert à l'URI de redirection OAuth et à l'URL du média envoyée à Descript, sans jamais faire confiance à l'en-tête `Host`. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Connexion YouTube. Client OAuth « Application Web », redirection `<origine>/api/youtube/callback`, API « YouTube Data v3 » activée. |
+| `VIDIQ_SCORE_ENDPOINT` | Relais vidIQ personnel pour les scores réels de titres. |
 
-## Workspace Auth Headers
+**Les clés API (OpenRouter, OpenAI, Descript) ne se mettent pas dans `.env`** en usage normal : elles se saisissent dans l'application, sont testées auprès du fournisseur avant enregistrement, puis chiffrées côté serveur et liées à votre compte. Le navigateur n'en reçoit jamais que les quatre derniers caractères.
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+## Sécurité
 
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
+Toute route qui dépense des crédits exige une identité authentifiée et résout la clé côté serveur ; aucune n'accepte de clé dans le corps de requête. Le refresh token YouTube est chiffré, propre à chaque utilisateur, et l'état OAuth est à usage unique et lié à celui qui a lancé le flux. Les identifiants de projet fournis par le client sont validés et encodés avant d'atteindre une URL Descript. Chaque appel sortant a une échéance.
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+Ces propriétés sont vérifiées par la suite de tests : une régression fait échouer le build.
 
-Treat the full name as optional and fall back to email when it is absent:
+## Vérification
 
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npx tsc --noEmit
+npm run lint
+npx vinext build
+node --test tests/rendered-html.test.mjs
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+La suite démarre le worker réel et vérifie le rendu, les contrats des routes et une série d'invariants — pas de clé dans un corps de requête, pas d'identité de repli partagée, styles Shorts confinés, ratios de miniatures corrects par format.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## Architecture
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+```
+app/
+  script-studio.tsx     shell (nav, langue, alertes, persistance, profil) + pipeline long
+  shorts-studio.tsx     pipeline shorts, rendu sous .pipeline-shorts
+  globals.css           styles partagés · shorts.css  styles shorts, tous portés
+  server/               identity, secrets, http, poll, youtube, ai-cache, image-framing
+  api/                  routes ; les routes shorts-* sont préfixées
+db/schema.ts            workspaces, integration_settings, ai_cache, shorts_projects,
+                        descript_jobs, youtube_auth, oauth_states
+```
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the app and verify the rendered workspace and AI routes
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+Les styles Shorts sont tous portés par `.pipeline-shorts` : les deux feuilles partagent dix-sept noms de classes, et cette contrainte — vérifiée par un test — rend la collision impossible plutôt qu'improbable.

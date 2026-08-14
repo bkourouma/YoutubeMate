@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -41,10 +42,17 @@ function commaSeparatedTags(tags: string[]) {
   return tags.map(tag => tag.trim()).filter(Boolean).join(", ");
 }
 
-export function ShortsStudio({ lang, openrouterReady, writerModel, showToast, copy, openSettings, postJson, connectionLost }: {
+export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, imageModel, imageQuality, channel, thumbnailSystemPrompt, referenceKeys, presenterKey, showToast, copy, openSettings, postJson, connectionLost }: {
   lang: Lang;
   openrouterReady: boolean;
+  openaiReady: boolean;
   writerModel: string;
+  imageModel: string;
+  imageQuality: string;
+  channel: string;
+  thumbnailSystemPrompt: string;
+  referenceKeys: string[];
+  presenterKey: string;
   showToast: (message: string, kind?: AlertKind) => void;
   copy: (value: string) => void;
   openSettings: () => void;
@@ -72,6 +80,8 @@ export function ShortsStudio({ lang, openrouterReady, writerModel, showToast, co
   const [uploaded, setUploaded] = useState<Record<number, string>>({});
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; title: string } | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [thumbnails, setThumbnails] = useState<Record<number, { image: string; format: string }>>({});
+  const [thumbnailLoading, setThumbnailLoading] = useState<number | null>(null);
 
   const titlesReady = shorts.length > 0 && shorts.every((_, index) => Boolean(selectedTitles[index]));
   const metadataReady = shorts.length > 0 && shorts.every((_, index) => Boolean(metadata[index]));
@@ -224,6 +234,53 @@ export function ShortsStudio({ lang, openrouterReady, writerModel, showToast, co
     } catch {
       showToast(lang === "fr" ? "Suppression impossible." : "Could not delete the project.", "error");
     }
+  };
+
+  // One image is generated only after a concept is chosen — the three concepts are free,
+  // so the user never pays for two images they will not use.
+  const generateThumbnail = async (index: number) => {
+    const conceptIndex = selectedConcepts[index];
+    const concept = metadata[index]?.thumbnailConcepts[conceptIndex ?? -1];
+    if (!concept) return showToast(lang === "fr" ? "Choisissez d’abord un concept." : "Choose a concept first.", "warning");
+    if (!openaiReady) return showToast(lang === "fr" ? "Ajoutez votre clé OpenAI dans Profil & paramètres." : "Add your OpenAI key in Profile & settings.", "warning");
+    setThumbnailLoading(index);
+    try {
+      const response = await postJson("/api/openai-image", {
+        pipeline: "shorts", model: imageModel, quality: imageQuality,
+        prompt: concept.prompt, overlay: concept.overlayText, channel,
+        systemPrompt: thumbnailSystemPrompt, referenceKeys, presenterKey,
+      });
+      const data = await response.json() as { image?: string; format?: string; detail?: string; error?: string };
+      if (!response.ok || !data.image) throw new Error(data.detail || data.error || "image_failed");
+      setThumbnails(current => ({ ...current, [index]: { image: data.image as string, format: data.format ?? "jpg" } }));
+      showToast(lang === "fr" ? "Miniature verticale générée" : "Vertical thumbnail generated");
+    } catch (error) {
+      showToast(error instanceof TypeError ? connectionLost(lang)
+        : (lang === "fr" ? "La génération de la miniature a échoué." : "Thumbnail generation failed."), "error");
+    } finally { setThumbnailLoading(null); }
+  };
+
+  // The model returns a 9:16 image in its own size family; YouTube wants 720 × 1280,
+  // so the exact delivery size is produced here rather than requested upstream.
+  const downloadThumbnail = (index: number) => {
+    const item = thumbnails[index];
+    if (!item) return;
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 720; canvas.height = 1280;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      const scale = Math.max(canvas.width / image.width, canvas.height / image.height);
+      const width = image.width * scale;
+      const height = image.height * scale;
+      context.drawImage(image, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+      const link = document.createElement("a");
+      link.download = `short-${String(index + 1).padStart(2, "0")}-720x1280.jpg`;
+      link.href = canvas.toDataURL("image/jpeg", 0.92);
+      link.click();
+    };
+    image.src = item.image;
   };
 
   const loadDescriptProjects = async () => {
@@ -416,6 +473,16 @@ export function ShortsStudio({ lang, openrouterReady, writerModel, showToast, co
                   </span>
                 </label>)}
               </fieldset>
+              <div className="short-thumbnail-actions">
+                <button className="primary" onClick={() => generateThumbnail(index)} disabled={selectedConcepts[index] === undefined || thumbnailLoading !== null}>
+                  {thumbnailLoading === index ? (lang === "fr" ? "Création…" : "Creating…") : thumbnails[index] ? (lang === "fr" ? "↻ Régénérer la miniature" : "↻ Regenerate thumbnail") : (lang === "fr" ? "✦ Générer cette miniature" : "✦ Generate this thumbnail")}
+                </button>
+                {thumbnails[index] && <button onClick={() => downloadThumbnail(index)}>↓ {lang === "fr" ? "Télécharger" : "Download"}</button>}
+              </div>
+              {thumbnails[index] && <figure className="short-thumbnail">
+                <img src={thumbnails[index].image} alt={`${lang === "fr" ? "Miniature" : "Thumbnail"} ${index + 1}`} />
+                <figcaption>{lang === "fr" ? "Miniature Short · 720 × 1280" : "Short thumbnail · 720 × 1280"}</figcaption>
+              </figure>}
             </div>}
           </article>;
         })}</div>

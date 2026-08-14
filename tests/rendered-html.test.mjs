@@ -491,6 +491,36 @@ test("ports the Shorts data routes with identity, caps and its cue logic intact"
   assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
 });
 
+test("frames long-form and Shorts thumbnails at their own exact ratios", async () => {
+  const framing = await readFile(new URL("../app/server/image-framing.ts", import.meta.url), "utf8");
+  // Parse the four size mappings out of the module and check the geometry itself,
+  // rather than trusting the strings: a transposed pair is invisible until the image
+  // lands on YouTube cropped.
+  const sizes = [...framing.matchAll(/"(\d{3,4})x(\d{3,4})"/g)].map(match => ({ width: Number(match[1]), height: Number(match[2]) }));
+  assert.equal(sizes.length, 4, "expected one size per pipeline per model");
+  const landscape = sizes.filter(size => size.width > size.height);
+  const portrait = sizes.filter(size => size.height > size.width);
+  assert.equal(landscape.length, 2);
+  assert.equal(portrait.length, 2);
+  // Every portrait size is the transpose of a landscape one, so the two pipelines stay
+  // inside the same model size family and can never drift apart.
+  for (const tall of portrait) {
+    assert.ok(landscape.some(wide => wide.width === tall.height && wide.height === tall.width), `${tall.width}x${tall.height} has no landscape transpose`);
+  }
+  // gpt-image-2 supports the exact ratios; gpt-image-1.5 does not, so the closest
+  // supported size is requested and the client crops on download.
+  assert.ok(landscape.some(size => Math.abs(size.width / size.height - 16 / 9) < 0.001), "no exact 16:9 landscape size");
+  assert.ok(portrait.some(size => Math.abs(size.width / size.height - 9 / 16) < 0.001), "no exact 9:16 portrait size");
+  for (const size of landscape) assert.ok(size.width > size.height, "landscape must stay landscape");
+  for (const size of portrait) assert.ok(size.height > size.width, "portrait must stay portrait");
+  // The presenter instruction must differ by orientation, or the photo is framed wrong.
+  assert.match(framing, /export function presenterBrief/);
+  assert.match(framing, /Frame them vertically/);
+  const shortsStudio = await readFile(new URL("../app/shorts-studio.tsx", import.meta.url), "utf8");
+  // YouTube wants 720x1280 on delivery; the model is not asked for it.
+  assert.match(shortsStudio, /canvas\.width = 720; canvas\.height = 1280;/);
+});
+
 test("uploads one short per request and hardens the Descript calls", async () => {
   const [upload, descript, shorts, poll] = await Promise.all([
     readFile(new URL("../app/api/shorts-upload/route.ts", import.meta.url), "utf8"),
