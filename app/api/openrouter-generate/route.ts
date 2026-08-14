@@ -1,4 +1,5 @@
 import { requireApiKey } from "../../server/secrets";
+import { openRouterHeaders } from "../../server/http";
 
 type RequestBody = {
   model?: string;
@@ -50,12 +51,7 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        "http-referer": "https://script-studio-youtube.bkourouma.chatgpt.site/",
-        "x-title": "Script Studio",
-      },
+      headers: openRouterHeaders(apiKey),
       body: JSON.stringify({
         model,
         messages: [{ role: "system", content: instructions }, { role: "user", content: context }],

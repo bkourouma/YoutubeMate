@@ -139,6 +139,15 @@
 .pipeline-shorts .short-thumbnail figcaption { margin-top:5px; color:#8b968f; font-size:8px; }
 
 .pipeline-shorts .shorts-publish { margin-top:14px; padding:16px; border:1px solid #c3bdf5; border-radius:10px; background:#fbfbff; }
+.pipeline-shorts .shorts-route-choice { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-bottom:14px; }
+.pipeline-shorts .shorts-route-choice button { text-align:left; border:1px solid var(--line); border-radius:9px; background:#fff; padding:11px 13px; }
+.pipeline-shorts .shorts-route-choice button strong { display:block; font-size:11px; color:#26352e; }
+.pipeline-shorts .shorts-route-choice button small { display:block; margin-top:4px; color:#8b968f; font-size:8px; line-height:1.45; }
+.pipeline-shorts .shorts-route-choice button.active { border-color:var(--accent); background:#f4f3fe; box-shadow:0 0 0 3px #6557e81f; }
+.pipeline-shorts .shorts-capcut p { margin:0 0 11px; color:#61706a; font-size:9px; line-height:1.6; }
+.pipeline-shorts .shorts-capcut-link { color:var(--accent); font-size:9px; font-weight:700; text-decoration:none; }
+.pipeline-shorts .shorts-capcut-link:hover { text-decoration:underline; }
+
 .pipeline-shorts .shorts-publish-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:end; }
 .pipeline-shorts .shorts-publish-row > label > span { display:block; font-size:9px; font-weight:700; color:#64736b; margin-bottom:6px; }
 .pipeline-shorts .shorts-publish-row select { width:100%; border:1px solid #d7ded9; border-radius:7px; padding:9px; font-size:10px; outline:0; background:#fff; }

@@ -491,6 +491,28 @@ test("ports the Shorts data routes with identity, caps and its cue logic intact"
   assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
 });
 
+test("builds a CapCut kit that carries the cut plan and the CTA clip", async () => {
+  const [kit, shorts, packageJson] = await Promise.all([
+    readFile(new URL("../app/lib/capcut-kit.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/shorts-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ]);
+  // Descript is optional: the kit is the other production route, so the pieces an
+  // editor cannot reconstruct by hand must all be in the archive.
+  for (const entry of ["plan-de-montage.csv", "sous-titres-source.srt", "texte.txt", "publication.txt", "SHORT CTA.mp4"]) {
+    assert.ok(kit.includes(entry), `the kit must contain ${entry}`);
+  }
+  // Cue placement inside the real source segments is what makes the SRT usable.
+  assert.match(kit, /export function buildSrt/);
+  assert.match(kit, /Math\.max\(1\.2, Math\.min\(2\.4,/);
+  // Estimated timings must stay flagged all the way into the archive.
+  assert.match(kit, /positionEstimated \? \(fr \? "oui" : "yes"\)/);
+  // JSZip is only loaded by people who edit in CapCut.
+  assert.match(shorts, /await import\("\.\/lib\/capcut-kit"\)/);
+  assert.match(packageJson, /"jszip"/);
+  await access(new URL("../public/short-cta.mp4", import.meta.url));
+});
+
 test("frames long-form and Shorts thumbnails at their own exact ratios", async () => {
   const framing = await readFile(new URL("../app/server/image-framing.ts", import.meta.url), "utf8");
   // Parse the four size mappings out of the module and check the geometry itself,

@@ -82,6 +82,8 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
   const [publishing, setPublishing] = useState(false);
   const [thumbnails, setThumbnails] = useState<Record<number, { image: string; format: string }>>({});
   const [thumbnailLoading, setThumbnailLoading] = useState<number | null>(null);
+  const [kitBuilding, setKitBuilding] = useState(false);
+  const [productionRoute, setProductionRoute] = useState<"descript" | "capcut">("descript");
 
   const titlesReady = shorts.length > 0 && shorts.every((_, index) => Boolean(selectedTitles[index]));
   const metadataReady = shorts.length > 0 && shorts.every((_, index) => Boolean(metadata[index]));
@@ -281,6 +283,25 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
       link.click();
     };
     image.src = item.image;
+  };
+
+  const downloadCapCutKit = async () => {
+    if (kitBuilding) return;
+    setKitBuilding(true);
+    try {
+      // Loaded on demand: JSZip is only needed by people who edit in CapCut.
+      const { buildCapCutKit } = await import("./lib/capcut-kit");
+      const blob = await buildCapCutKit({ shorts, titles: selectedTitles, metadata, includeCta, lang });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `kit-capcut-${shorts.length}-shorts.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast(lang === "fr" ? "Kit CapCut téléchargé" : "CapCut kit downloaded");
+    } catch {
+      showToast(lang === "fr" ? "La création du kit a échoué." : "Building the kit failed.", "error");
+    } finally { setKitBuilding(false); }
   };
 
   const loadDescriptProjects = async () => {
@@ -494,6 +515,24 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
         {metadataReady && <section className="shorts-publish">
           <div className="shorts-section-head"><span className="section-number">04</span><div><h2>{lang === "fr" ? "Production" : "Production"}</h2><p>{lang === "fr" ? "Descript crée une composition verticale par short. Vérifiez-les dans Descript, puis envoyez-les sur YouTube — toujours en privé." : "Descript creates one vertical composition per short. Review them in Descript, then upload to YouTube — always privately."}</p></div></div>
 
+          <div className="shorts-route-choice">
+            <button className={productionRoute === "descript" ? "active" : ""} onClick={() => setProductionRoute("descript")}>
+              <strong>Descript</strong><small>{lang === "fr" ? "Compositions créées automatiquement, puis envoi vers YouTube" : "Compositions built automatically, then uploaded to YouTube"}</small>
+            </button>
+            <button className={productionRoute === "capcut" ? "active" : ""} onClick={() => setProductionRoute("capcut")}>
+              <strong>CapCut</strong><small>{lang === "fr" ? "Kit de montage à importer : plan, timecodes, sous-titres et fiches" : "An editing kit to import: plan, timecodes, subtitles and metadata"}</small>
+            </button>
+          </div>
+
+          {productionRoute === "capcut" ? <div className="shorts-capcut">
+            <p>{lang === "fr" ? "CapCut ne propose pas de connexion publique permettant de construire une timeline automatiquement. Le kit prépare tout le reste : le plan de coupe avec chaque timecode, les sous-titres au format SRT, les titres, descriptions et tags, et un guide de montage." : "CapCut offers no public API to build a timeline automatically. The kit prepares everything else: the cut plan with every timecode, SRT subtitles, titles, descriptions and tags, and an editing guide."}</p>
+            <label className="shorts-cta-toggle"><input type="checkbox" checked={includeCta} onChange={event => setIncludeCta(event.target.checked)} /><span>{lang === "fr" ? "Inclure la vidéo CTA dans le kit" : "Include the CTA video in the kit"}</span></label>
+            <div className="shorts-publish-actions">
+              <button className="primary" onClick={downloadCapCutKit} disabled={kitBuilding}>{kitBuilding ? (lang === "fr" ? "Préparation…" : "Preparing…") : `↓ ${lang === "fr" ? "Télécharger le kit CapCut" : "Download the CapCut kit"}`}</button>
+              <a className="shorts-capcut-link" href="https://www.capcut.com/editor" target="_blank" rel="noreferrer">{lang === "fr" ? "Ouvrir CapCut Web" : "Open CapCut Web"} →</a>
+            </div>
+          </div> : <>
+
           <div className="shorts-publish-row">
             <label><span>{lang === "fr" ? "Projet Descript" : "Descript project"}</span>
               <select value={descriptProjectId} onChange={event => setDescriptProjectId(event.target.value)}>
@@ -524,6 +563,7 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
           </div>
           {Object.keys(uploaded).length > 0 && <ul className="shorts-uploaded">{Object.entries(uploaded).map(([index, videoId]) => <li key={videoId}><b>✓</b><span>{selectedTitles[Number(index)] || shorts[Number(index)]?.title}</span><small>{lang === "fr" ? "privée" : "private"} · {videoId}</small></li>)}</ul>}
           <p className="shorts-publish-note">{lang === "fr" ? "Chaque short part dans sa propre requête : une coupure ne fait perdre que celui en cours, et relancer reprend au premier short manquant." : "Each short travels in its own request: an interruption only costs the one in flight, and running again resumes at the first missing short."}</p>
+          </>}
         </section>}
       </section>}
 

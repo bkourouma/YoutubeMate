@@ -1,4 +1,5 @@
 import { requireApiKey } from "../../server/secrets";
+import { openRouterHeaders } from "../../server/http";
 
 type ChapterDraft = {
   title?: unknown;
@@ -127,12 +128,7 @@ TARGET BODY: ${targetBodyWords} words; use 5 to 12 chapters, with ${requestedCha
     const callModel = async (messages: Array<{ role: "system" | "user"; content: string }>) => {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-          "http-referer": "https://script-studio-youtube.bkourouma.chatgpt.site/",
-          "x-title": "Script Studio",
-        },
+        headers: openRouterHeaders(apiKey),
         body: JSON.stringify({
           model,
           messages,

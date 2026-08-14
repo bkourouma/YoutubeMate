@@ -1,4 +1,5 @@
 import { requireApiKey } from "../../server/secrets";
+import { openRouterHeaders } from "../../server/http";
 
 type HookTarget = "hook" | "promise" | "both";
 
@@ -114,12 +115,7 @@ USER DIRECTION: ${direction || "None"}`;
     const callModel = async (messages: Array<{ role: "system" | "user"; content: string }>, temperature: number) => {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-          "http-referer": "https://script-studio-youtube.bkourouma.chatgpt.site/",
-          "x-title": "Script Studio",
-        },
+        headers: openRouterHeaders(apiKey),
         body: JSON.stringify({
           model,
           messages,

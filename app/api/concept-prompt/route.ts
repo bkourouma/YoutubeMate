@@ -1,4 +1,5 @@
 import { requireApiKey } from "../../server/secrets";
+import { openRouterHeaders } from "../../server/http";
 
 type RequestBody = {
   model?: string;
@@ -46,12 +47,7 @@ export async function POST(request: Request) {
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        "http-referer": "https://script-studio-youtube.bkourouma.chatgpt.site/",
-        "x-title": "Script Studio",
-      },
+      headers: openRouterHeaders(apiKey),
       body: JSON.stringify({
         model,
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
