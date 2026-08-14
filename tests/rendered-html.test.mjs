@@ -459,6 +459,38 @@ test("reports a provider-output failure instead of mislabelling it as HTTP 422",
   }
 });
 
+test("ports the Shorts data routes with identity, caps and its cue logic intact", async () => {
+  const [analyze, titles, metadata, projects, cache] = await Promise.all([
+    readFile(new URL("../app/api/shorts-analyze/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shorts-titles/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shorts-metadata/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shorts-projects/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/ai-cache.ts", import.meta.url), "utf8"),
+  ]);
+  // The SRT cue logic is what makes exact source timecodes possible — a careless
+  // port would break it silently, so pin its shape.
+  assert.match(analyze, /const timestampPattern = \/\^\(\\d\{1,2\}\):\(\\d\{2\}\):\(\\d\{2\}\)\[,\.\]\(\\d\{3\}\)/);
+  assert.match(analyze, /function constrainCueRanges/);
+  assert.match(analyze, /\[\\u0300-\\u036f\]/);
+  assert.match(analyze, /const maxSeconds = targetMinutes \* 60 \+ 5;/);
+  assert.match(analyze, /const maxWords = targetMinutes \* 180;/);
+  // Unbounded input is an unbounded bill.
+  assert.match(analyze, /MAX_TRANSCRIPT/);
+  assert.match(titles, /MAX_SHORTS/);
+  assert.match(metadata, /MAX_ITEMS/);
+  // Truncation recovery must survive the port.
+  assert.match(metadata, /class IncompleteMetadataResponse/);
+  assert.match(metadata, /createMetadataReliably/);
+  // The owner belongs in the cache key, or two accounts share results.
+  assert.match(cache, /makeCacheKey\(kind: string, userId: string, value: unknown\)/);
+  assert.match(cache, /\$\{kind\}:\$\{userId\}:/);
+  // Project rows: real identity, no self-issued visitor cookie, capped and deletable.
+  assert.doesNotMatch(projects, /visitor/i);
+  assert.match(projects, /MAX_PROJECTS/);
+  assert.match(projects, /export async function DELETE/);
+  assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
+});
+
 test("keeps Shorts styles scoped so the two pipelines can never collide", async () => {
   const shorts = await readFile(new URL("../app/shorts.css", import.meta.url), "utf8");
   const withoutComments = shorts.replace(/\/\*[\s\S]*?\*\//g, "");
