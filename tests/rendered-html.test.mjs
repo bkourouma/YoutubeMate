@@ -491,6 +491,34 @@ test("ports the Shorts data routes with identity, caps and its cue logic intact"
   assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
 });
 
+test("uploads one short per request and hardens the Descript calls", async () => {
+  const [upload, descript, shorts, poll] = await Promise.all([
+    readFile(new URL("../app/api/shorts-upload/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shorts-descript/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/shorts-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/poll.ts", import.meta.url), "utf8"),
+  ]);
+  // The original looped over every short inside one request: ~an hour of wall clock,
+  // and a dropped connection lost every paid render.
+  assert.doesNotMatch(upload, /shorts\?:\s*Array/);
+  assert.match(upload, /title\?: string; description\?: string/);
+  assert.match(shorts, /const publishToYoutube = /);
+  assert.match(shorts, /filter\(\(\{ index \}\) => !uploaded\[index\]\)/);
+  // Deadlines are wall-clock, not attempt counts.
+  assert.match(poll, /deadlineMs/);
+  assert.doesNotMatch(upload, /attempt < \d+/);
+  assert.doesNotMatch(descript, /attempt < \d+/);
+  // Client-supplied ids are never interpolated raw into a Descript URL.
+  assert.match(descript, /const PROJECT_ID = \/\^\[A-Za-z0-9_-\]/);
+  assert.match(upload, /encodeURIComponent\(projectId\)/);
+  assert.match(descript, /encodeURIComponent\(projectId\)/);
+  // Descript fetches the CTA itself, so its URL must not follow the request Host.
+  assert.match(descript, /publicOrigin\(request\)/);
+  assert.doesNotMatch(descript, /nextUrl\.origin/);
+  // Uploads always land private for review.
+  assert.match(upload, /privacyStatus: "private"/);
+});
+
 test("binds the YouTube connection to one account and to a single-use state", async () => {
   const [auth, callback, helper, schema] = await Promise.all([
     readFile(new URL("../app/api/youtube/auth/route.ts", import.meta.url), "utf8"),

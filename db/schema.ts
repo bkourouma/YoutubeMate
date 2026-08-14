@@ -29,6 +29,20 @@ export const aiCache = sqliteTable("ai_cache", {
   createdAt: text("created_at").notNull(),
 }, table => [index("idx_ai_cache_user_created").on(table.userId, table.createdAt)]);
 
+// One-hour idempotency ledger for Descript agent jobs. Scoped by user: without that,
+// an identical request from another account returned someone else's job_id to poll.
+export const descriptJobs = sqliteTable("descript_jobs", {
+  userId: text("user_id").notNull(),
+  key: text("key").notNull(),
+  projectId: text("project_id").notNull(),
+  jobId: text("job_id").notNull(),
+  jobState: text("job_state").notNull(),
+  model: text("model"),
+  usagePayload: text("usage_payload"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, table => [primaryKey({ columns: [table.userId, table.key] })]);
+
 // One YouTube connection per user, refresh token encrypted like every other secret.
 // The original stored a single global row (id = 1) in plaintext, so any visitor who
 // completed the OAuth flow repointed everyone's uploads at their own channel.

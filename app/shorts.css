@@ -131,6 +131,20 @@
 .pipeline-shorts .shorts-production strong { display:block; font-size:10.5px; }
 .pipeline-shorts .shorts-production p { margin:4px 0 0; color:#657570; font-size:9px; line-height:1.55; }
 
+.pipeline-shorts .shorts-publish { margin-top:14px; padding:16px; border:1px solid #c3bdf5; border-radius:10px; background:#fbfbff; }
+.pipeline-shorts .shorts-publish-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:end; }
+.pipeline-shorts .shorts-publish-row > label > span { display:block; font-size:9px; font-weight:700; color:#64736b; margin-bottom:6px; }
+.pipeline-shorts .shorts-publish-row select { width:100%; border:1px solid #d7ded9; border-radius:7px; padding:9px; font-size:10px; outline:0; background:#fff; }
+.pipeline-shorts .shorts-cta-toggle { display:flex; align-items:center; gap:7px; font-size:9px; color:#54635c; white-space:nowrap; }
+.pipeline-shorts .shorts-publish-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.pipeline-shorts .shorts-publish-note { margin:0; color:#8b968f; font-size:8px; line-height:1.5; flex:1; min-width:200px; }
+.pipeline-shorts .shorts-publish-divider { display:flex; align-items:center; gap:10px; margin:16px 0 4px; color:#94a09a; font-size:8px; }
+.pipeline-shorts .shorts-publish-divider:before,.pipeline-shorts .shorts-publish-divider:after { content:""; flex:1; height:1px; background:var(--line); }
+.pipeline-shorts .shorts-uploaded { list-style:none; margin:12px 0 0; padding:0; display:grid; gap:5px; }
+.pipeline-shorts .shorts-uploaded li { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:7px; background:#eef7f1; font-size:9px; color:#3f5a4a; }
+.pipeline-shorts .shorts-uploaded b { color:var(--green); }
+.pipeline-shorts .shorts-uploaded small { margin-left:auto; color:#7e8c85; font-size:8px; }
+
 .pipeline-shorts .shorts-history h2 { margin:0 0 12px; font-family:Georgia,serif; font-size:17px; }
 .pipeline-shorts .shorts-history ul { list-style:none; margin:0; padding:0; display:grid; gap:7px; }
 .pipeline-shorts .shorts-history li { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; }

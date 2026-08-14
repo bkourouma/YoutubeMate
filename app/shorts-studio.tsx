@@ -65,6 +65,13 @@ export function ShortsStudio({ lang, openrouterReady, writerModel, showToast, co
   const [projects, setProjects] = useState<ShortsProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [descriptProjects, setDescriptProjects] = useState<Array<{ id: string; name: string }>>([]);
+  const [descriptProjectId, setDescriptProjectId] = useState("");
+  const [includeCta, setIncludeCta] = useState(true);
+  const [compositionState, setCompositionState] = useState<"idle" | "running" | "done">("idle");
+  const [uploaded, setUploaded] = useState<Record<number, string>>({});
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; title: string } | null>(null);
+  const [publishing, setPublishing] = useState(false);
 
   const titlesReady = shorts.length > 0 && shorts.every((_, index) => Boolean(selectedTitles[index]));
   const metadataReady = shorts.length > 0 && shorts.every((_, index) => Boolean(metadata[index]));
@@ -219,6 +226,83 @@ export function ShortsStudio({ lang, openrouterReady, writerModel, showToast, co
     }
   };
 
+  const loadDescriptProjects = async () => {
+    try {
+      const response = await fetch("/api/shorts-descript");
+      const data = await response.json() as { projects?: Array<{ id: string; name: string }>; error?: string };
+      if (!response.ok) throw new Error(data.error || "descript_unavailable");
+      setDescriptProjects(data.projects ?? []);
+      if (!data.projects?.length) showToast(lang === "fr" ? "Aucun projet Descript trouvé." : "No Descript project found.", "warning");
+    } catch (error) {
+      showToast(error instanceof TypeError ? connectionLost(lang)
+        : (lang === "fr" ? "Descript est injoignable. Vérifiez la clé dans Paramètres." : "Descript is unreachable. Check the key in Settings."), "error");
+    }
+  };
+
+  const createCompositions = async () => {
+    if (publishing || !descriptProjectId) return;
+    setPublishing(true); setCompositionState("running");
+    try {
+      const response = await postJson("/api/shorts-descript", {
+        action: "create_compositions", projectId: descriptProjectId, includeCtaVideo: includeCta,
+        shorts: shorts.map((short, index) => ({ title: selectedTitles[index] || short.title, text: short.text, durationMinutes: short.targetMinutes, sequences: short.sequences })),
+      });
+      const data = await response.json() as { job_id?: string; deduplicated?: boolean; error?: string };
+      if (!response.ok || !data.job_id) throw new Error(data.error || "descript_failed");
+      setCompositionState("done");
+      showToast(data.deduplicated
+        ? (lang === "fr" ? "Création déjà en cours dans Descript — suivi repris." : "Creation already running in Descript — tracking resumed.")
+        : (lang === "fr" ? "Descript construit les compositions. Vérifiez-les avant l’envoi." : "Descript is building the compositions. Review them before uploading."));
+    } catch (error) {
+      setCompositionState("idle");
+      showToast(error instanceof TypeError ? connectionLost(lang)
+        : (lang === "fr" ? "La création des compositions a échoué." : "Composition creation failed."), "error");
+    } finally { setPublishing(false); }
+  };
+
+  /**
+   * One request per short, driven from here. A single request for the whole series
+   * would hold a Worker open for tens of minutes and lose every paid render if the
+   * connection dropped; here a failure keeps what already landed and the next run
+   * resumes at the first short without a video id.
+   */
+  const publishToYoutube = async (onlyFirst: boolean) => {
+    if (publishing || !descriptProjectId) return;
+    const pending = shorts.map((short, index) => ({ short, index })).filter(({ index }) => !uploaded[index]);
+    const queue = onlyFirst ? pending.slice(0, 1) : pending;
+    if (!queue.length) return showToast(lang === "fr" ? "Tous les shorts ont déjà été envoyés." : "Every short has already been uploaded.", "warning");
+    setPublishing(true);
+    const done: Record<number, string> = {};
+    try {
+      for (const { short, index } of queue) {
+        const title = selectedTitles[index] || short.title;
+        setUploadProgress({ current: Object.keys(done).length + 1, total: queue.length, title });
+        const response = await postJson("/api/shorts-upload", {
+          projectId: descriptProjectId, title,
+          description: metadata[index]?.description ?? title,
+          tags: metadata[index]?.tags ?? [],
+        });
+        const data = await response.json().catch(() => ({})) as { videoId?: string; error?: string; title?: string };
+        if (!response.ok || !data.videoId) {
+          const reason = data.error === "composition_not_found"
+            ? (lang === "fr" ? `Aucune composition Descript nommée « ${title} ». Renommez-la à l’identique ou relancez la création.` : `No Descript composition named “${title}”. Rename it to match, or run the creation again.`)
+            : data.error === "youtube_not_connected"
+              ? (lang === "fr" ? "Connectez votre chaîne YouTube dans Paramètres." : "Connect your YouTube channel in Settings.")
+              : (lang === "fr" ? "L’envoi a échoué." : "The upload failed.");
+          const kept = Object.keys(done).length;
+          showToast(`${reason} ${kept ? (lang === "fr" ? `Les ${kept} short(s) déjà envoyés sont conservés ; relancez pour reprendre.` : `The ${kept} short(s) already uploaded are kept; run again to resume.`) : ""}`.trim(), "error");
+          break;
+        }
+        done[index] = data.videoId;
+        setUploaded(current => ({ ...current, [index]: data.videoId as string }));
+      }
+      const count = Object.keys(done).length;
+      if (count) showToast(lang === "fr" ? `${count} short(s) envoyé(s) en privé sur YouTube` : `${count} short(s) uploaded privately to YouTube`);
+    } catch (error) {
+      showToast(error instanceof TypeError ? connectionLost(lang) : (lang === "fr" ? "L’envoi a été interrompu." : "The upload was interrupted."), "error");
+    } finally { setPublishing(false); setUploadProgress(null); }
+  };
+
   const totalCost = usage.reduce((sum, entry) => sum + (entry.usage.cost || 0), 0);
   const busyLabel = loading === "analyze" ? (lang === "fr" ? "L’IA analyse la transcription…" : "AI is analysing the transcript…")
     : loading === "titles" ? (lang === "fr" ? "L’IA écrit les titres…" : "AI is writing the titles…")
@@ -340,7 +424,40 @@ export function ShortsStudio({ lang, openrouterReady, writerModel, showToast, co
           <button className="primary" onClick={generateMetadata} disabled={loading !== null}>{loading === "metadata" ? busyLabel : (metadataReady ? (lang === "fr" ? "↻ Régénérer les fiches" : "↻ Regenerate metadata") : (lang === "fr" ? "Créer fiches et concepts" : "Create metadata and concepts"))}</button>
         </div>}
 
-        {metadataReady && <div className="shorts-production"><span>Ⅱ</span><div><strong>{lang === "fr" ? "Production : prochaine étape de l’intégration" : "Production: next integration step"}</strong><p>{lang === "fr" ? "La création automatique des compositions Descript, le kit de montage CapCut et l’envoi vers YouTube arrivent dans la suite de la fusion. Les fiches ci-dessus sont déjà copiables." : "Automatic Descript composition creation, the CapCut editing kit and YouTube upload arrive later in the merge. The metadata above is already copyable."}</p></div></div>}
+        {metadataReady && <section className="shorts-publish">
+          <div className="shorts-section-head"><span className="section-number">04</span><div><h2>{lang === "fr" ? "Production" : "Production"}</h2><p>{lang === "fr" ? "Descript crée une composition verticale par short. Vérifiez-les dans Descript, puis envoyez-les sur YouTube — toujours en privé." : "Descript creates one vertical composition per short. Review them in Descript, then upload to YouTube — always privately."}</p></div></div>
+
+          <div className="shorts-publish-row">
+            <label><span>{lang === "fr" ? "Projet Descript" : "Descript project"}</span>
+              <select value={descriptProjectId} onChange={event => setDescriptProjectId(event.target.value)}>
+                <option value="">{descriptProjects.length ? (lang === "fr" ? "Choisir un projet…" : "Choose a project…") : (lang === "fr" ? "Aucun projet chargé" : "No project loaded")}</option>
+                {descriptProjects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            </label>
+            <button className="ghost" onClick={loadDescriptProjects} disabled={publishing}>{lang === "fr" ? "Charger mes projets" : "Load my projects"}</button>
+            <label className="shorts-cta-toggle"><input type="checkbox" checked={includeCta} onChange={event => setIncludeCta(event.target.checked)} /><span>{lang === "fr" ? "Ajouter la vidéo CTA à la fin" : "Append the CTA video"}</span></label>
+          </div>
+
+          <div className="shorts-publish-actions">
+            <button className="primary" onClick={createCompositions} disabled={publishing || !descriptProjectId}>
+              {compositionState === "running" ? (lang === "fr" ? "Création en cours…" : "Creating…") : `${lang === "fr" ? `Créer ${shorts.length} composition(s) dans Descript` : `Create ${shorts.length} composition(s) in Descript`}`}
+            </button>
+            <p className="shorts-publish-note">{lang === "fr" ? "La composition source n’est jamais modifiée : de nouvelles compositions sont créées, nommées avec les titres retenus." : "The source composition is never modified: new ones are created, named after the chosen titles."}</p>
+          </div>
+
+          <div className="shorts-publish-divider"><span>{lang === "fr" ? "Puis, après vérification dans Descript" : "Then, after reviewing in Descript"}</span></div>
+
+          <div className="shorts-publish-actions">
+            <button className="ghost" onClick={() => publishToYoutube(true)} disabled={publishing || !descriptProjectId}>{lang === "fr" ? "Tester avec 1 vidéo" : "Test with 1 video"}</button>
+            <button className="primary" onClick={() => publishToYoutube(false)} disabled={publishing || !descriptProjectId}>
+              {uploadProgress
+                ? (lang === "fr" ? `Envoi ${uploadProgress.current}/${uploadProgress.total} — ${uploadProgress.title}…` : `Uploading ${uploadProgress.current}/${uploadProgress.total} — ${uploadProgress.title}…`)
+                : (lang === "fr" ? `Envoyer ${shorts.length - Object.keys(uploaded).length} short(s) sur YouTube` : `Upload ${shorts.length - Object.keys(uploaded).length} short(s) to YouTube`)}
+            </button>
+          </div>
+          {Object.keys(uploaded).length > 0 && <ul className="shorts-uploaded">{Object.entries(uploaded).map(([index, videoId]) => <li key={videoId}><b>✓</b><span>{selectedTitles[Number(index)] || shorts[Number(index)]?.title}</span><small>{lang === "fr" ? "privée" : "private"} · {videoId}</small></li>)}</ul>}
+          <p className="shorts-publish-note">{lang === "fr" ? "Chaque short part dans sa propre requête : une coupure ne fait perdre que celui en cours, et relancer reprend au premier short manquant." : "Each short travels in its own request: an interruption only costs the one in flight, and running again resumes at the first missing short."}</p>
+        </section>}
       </section>}
 
       {usage.length > 0 && <details className="shorts-usage"><summary>{lang === "fr" ? "Coûts IA de la session" : "Session AI costs"} · ${totalCost.toFixed(4)}</summary>
