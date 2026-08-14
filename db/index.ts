@@ -1,8 +1,11 @@
-import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
 
-export function getDb() {
+// `cloudflare:workers` is resolved lazily so importing this module never drags a
+// workerd-only specifier into a route's static graph — routes that merely *might*
+// touch the database stay loadable outside workerd (the SSR test harness, tooling).
+export async function getDb() {
+  const { env } = await import("cloudflare:workers");
   const runtimeEnv = env as unknown as { DB?: D1Database };
   if (!runtimeEnv.DB) {
     throw new Error(

@@ -1,5 +1,7 @@
+import { requireApiKey } from "../../server/secrets";
+import { openRouterHeaders } from "../../server/http";
+
 type RequestBody = {
-  apiKey?: string;
   model?: string;
   language?: "fr" | "en";
   inputType?: "script" | "description";
@@ -13,16 +15,14 @@ function parseJsonContent(content: string) {
   return JSON.parse((fenced ?? content).trim());
 }
 
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
-
 export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openrouter");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const source = body.source?.trim() ?? "";
   const model = body.model?.trim();
-  if (!apiKey || !model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
+  if (!model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
   if (source.length < 80 || source.length > 120_000) return Response.json({ error: "invalid_source_length" }, { status: 400 });
 
   const language = body.language === "en" ? "English" : "French";
@@ -51,12 +51,7 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        "http-referer": "https://script-studio-youtube.bkourouma.chatgpt.site/",
-        "x-title": "Script Studio",
-      },
+      headers: openRouterHeaders(apiKey),
       body: JSON.stringify({
         model,
         messages: [{ role: "system", content: instructions }, { role: "user", content: context }],
@@ -64,6 +59,7 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
         max_tokens: 6000,
         response_format: { type: "json_object" },
       }),
+      signal: AbortSignal.timeout(90_000),
     });
     const upstream = await response.json() as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string }; usage?: unknown };
     if (!response.ok) return Response.json({ error: "openrouter_request_failed", detail: upstream.error?.message ?? "Request failed" }, { status: response.status === 401 ? 401 : 502 });
@@ -94,6 +90,8 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
     result.improvedDescription = footer && !generatedDescription.includes(footer) ? `${generatedDescription}\n\n${footer}`.trim() : generatedDescription;
     return Response.json({ result, usage: upstream.usage ?? null });
   } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    if (timedOut) return Response.json({ error: "openrouter_timeout", detail: language === "English" ? "Packaging generation exceeded the allowed time. Regenerate to retry." : "La génération du packaging a dépassé le délai autorisé. Relancez la génération." }, { status: 504 });
     return Response.json({ error: "openrouter_invalid_response", detail: error instanceof Error ? error.message : "Invalid response" }, { status: 502 });
   }
 }

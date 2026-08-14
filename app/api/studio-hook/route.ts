@@ -1,7 +1,9 @@
+import { requireApiKey } from "../../server/secrets";
+import { openRouterHeaders } from "../../server/http";
+
 type HookTarget = "hook" | "promise" | "both";
 
 type RequestBody = {
-  apiKey?: string;
   model?: string;
   language?: "fr" | "en";
   action?: "generate" | "iterate";
@@ -23,10 +25,6 @@ type OpenRouterPayload = {
   error?: { message?: string };
   usage?: unknown;
 };
-
-function normalizeApiKey(value?: string) {
-  return value?.trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "") ?? "";
-}
 
 function textContent(value: unknown) {
   if (typeof value === "string") return value;
@@ -78,13 +76,15 @@ function countWords(value: string) {
 
 export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
-  const apiKey = normalizeApiKey(body.apiKey);
+  const guard = await requireApiKey("openrouter");
+  if (guard instanceof Response) return guard;
+  const { apiKey } = guard;
   const model = body.model?.trim();
   const subject = body.subject?.trim() ?? "";
   const action = body.action === "iterate" ? "iterate" : "generate";
   const target: HookTarget = body.target === "hook" || body.target === "promise" ? body.target : "both";
   const direction = body.direction?.trim() ?? "";
-  if (!apiKey || !model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
+  if (!model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
   if (subject.length < 3 || subject.length > 2_000) return Response.json({ error: "invalid_subject" }, { status: 400 });
   if (action === "iterate" && (!direction || direction.length > 2_000)) return Response.json({ error: "iteration_direction_required" }, { status: 400 });
 
@@ -115,12 +115,7 @@ USER DIRECTION: ${direction || "None"}`;
     const callModel = async (messages: Array<{ role: "system" | "user"; content: string }>, temperature: number) => {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-          "http-referer": "https://script-studio-youtube.bkourouma.chatgpt.site/",
-          "x-title": "Script Studio",
-        },
+        headers: openRouterHeaders(apiKey),
         body: JSON.stringify({
           model,
           messages,
@@ -129,6 +124,7 @@ USER DIRECTION: ${direction || "None"}`;
           response_format: { type: "json_object" },
           plugins: [{ id: "response-healing" }],
         }),
+        signal: AbortSignal.timeout(60_000),
       });
       const upstream = await response.json() as OpenRouterPayload;
       return { response, upstream, content: upstream.choices?.[0]?.message?.content };
@@ -183,6 +179,8 @@ USER DIRECTION: ${direction || "None"}`;
     };
     return Response.json({ result: { hook: parsed.hook.trim(), promise: parsed.promise.trim() }, warning, usage: completion.upstream.usage ?? null });
   } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    if (timedOut) return Response.json({ error: "openrouter_timeout", detail: language === "English" ? "Hook generation exceeded the allowed time. Retry." : "La génération du hook a dépassé le délai autorisé. Réessayez." }, { status: 504 });
     return Response.json({ error: "openrouter_invalid_response", detail: error instanceof Error ? error.message : "Invalid response" }, { status: 502 });
   }
 }

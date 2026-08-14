@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { headers } from "next/headers";
+import { requireUserId, unauthorizedResponse } from "../../server/identity";
 
 const MAX_REFERENCES = 4;
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
@@ -12,9 +12,7 @@ function bucket() {
 }
 
 async function userPrefix() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id") ?? "local-preview";
-  return `reference-thumbnails/${encodeURIComponent(userId)}/`;
+  return `reference-thumbnails/${encodeURIComponent(await requireUserId())}/`;
 }
 
 export async function GET(request: Request) {
@@ -39,8 +37,8 @@ export async function GET(request: Request) {
       url: `/api/reference-thumbnails?key=${encodeURIComponent(object.key)}`,
     }));
     return Response.json({ references, max: MAX_REFERENCES });
-  } catch {
-    return Response.json({ error: "reference_storage_unavailable", references: [] }, { status: 503 });
+  } catch (error) {
+    return unauthorizedResponse(error) ?? Response.json({ error: "reference_storage_unavailable", references: [] }, { status: 503 });
   }
 }
 
@@ -61,8 +59,8 @@ export async function POST(request: Request) {
       return bucket().put(key, file, { httpMetadata: { contentType: file.type }, customMetadata: { originalName: file.name.slice(0, 180), uploadedAt: new Date().toISOString() } });
     }));
     return Response.json({ ok: true });
-  } catch {
-    return Response.json({ error: "reference_upload_failed" }, { status: 503 });
+  } catch (error) {
+    return unauthorizedResponse(error) ?? Response.json({ error: "reference_upload_failed" }, { status: 503 });
   }
 }
 
@@ -73,7 +71,7 @@ export async function DELETE(request: Request) {
     if (!key.startsWith(prefix)) return Response.json({ error: "reference_forbidden" }, { status: 403 });
     await bucket().delete(key);
     return Response.json({ ok: true });
-  } catch {
-    return Response.json({ error: "reference_delete_failed" }, { status: 503 });
+  } catch (error) {
+    return unauthorizedResponse(error) ?? Response.json({ error: "reference_delete_failed" }, { status: 503 });
   }
 }
