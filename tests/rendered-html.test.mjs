@@ -969,3 +969,42 @@ test("exports the whole project as a Word document built for copy-paste", async 
   assert.match(studio, /await import\("\.\/lib\/word-export"\)/);
   assert.match(packageJson, /"docx"/);
 });
+
+test("appends the channel's default tags and trims from the end to fit YouTube's 500", async () => {
+  const { mergeTags, TAG_LIMIT, parseTagList } = await import("../app/lib/tags.ts");
+  assert.equal(TAG_LIMIT, 500);
+  // YouTube caps the field at 500 characters, not 500 tags. What is counted is the exact
+  // string the user pastes — joined by ", " — so the count is never under what YouTube
+  // then rejects.
+  const video = ["chatgpt luna", "luna 5.6"];
+  const merged = mergeTags(video, "#ia, intelligence artificielle,\nchatgpt luna");
+  assert.deepEqual(merged.tags, ["chatgpt luna", "luna 5.6", "ia", "intelligence artificielle"]);
+  assert.equal(merged.characters, merged.tags.join(", ").length);
+  assert.deepEqual(merged.dropped, []);
+  // Commas and newlines both separate; a leading # is stripped; a repeat is dropped once.
+  assert.deepEqual(parseTagList("#un, deux\ntrois,,  "), ["un", "deux", "trois"]);
+
+  // Overflow: the video's own tags survive and the generic ones go, from the end.
+  const many = Array.from({ length: 60 }, (_, index) => `tag generique numero ${index}`).join(",");
+  const trimmed = mergeTags(video, many);
+  assert.ok(trimmed.characters <= TAG_LIMIT, `${trimmed.characters} characters exceeds the limit`);
+  assert.ok(trimmed.dropped.length > 0, "nothing was dropped despite the overflow");
+  assert.deepEqual(trimmed.tags.slice(0, 2), video, "a video tag was sacrificed before a default");
+  // Dropped from the end, so the last default is the first to go.
+  assert.equal(trimmed.dropped[0], "tag generique numero 59");
+  // One more tag would have broken the limit: the trim stops at the last one that fits.
+  assert.ok([...trimmed.tags, trimmed.dropped[trimmed.dropped.length - 1]].join(", ").length > TAG_LIMIT);
+
+  const [word, studio] = await Promise.all([
+    readFile(new URL("../app/lib/word-export.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+  ]);
+  // What was cut is written into the document rather than dropped in silence.
+  assert.match(word, /merged\.dropped\.length/);
+  assert.match(word, /retirés pour tenir dans la limite/);
+  assert.match(studio, /mergeTags\(pack\.tags, profile\.defaultTags \?\? ""\)/);
+  // The profile carries the defaults and shows the budget they already spend.
+  assert.match(studio, /defaultTags\?: string;/);
+  assert.match(studio, /Tags par défaut de la chaîne/);
+  assert.match(studio, /defaultTagBudget/);
+});

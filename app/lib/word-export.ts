@@ -33,7 +33,7 @@ export type WordExportInput = {
     options: WordOption[];
     selected: Record<string, number>;
     description: string;
-    tags: string[];
+    tags: { tags: string[]; dropped: string[]; characters: number; limit: number };
     pinnedComment: string;
     quiz: WordQuiz[];
     scores: Record<string, number>;
@@ -241,7 +241,22 @@ export async function buildWordDocument(input: WordExportInput) {
     children.push(...copyBlock(pack.description || "—"));
 
     children.push(heading(t(lang, "9. Tags", "9. Tags"), HeadingLevel.HEADING_1));
-    children.push(...copyBlock(pack.tags.join(", ") || "—"));
+    const merged = pack.tags;
+    children.push(body(
+      t(lang,
+        `Tags de la vidéo puis tags par défaut de la chaîne — ${merged.tags.length} tags, ${merged.characters} / ${merged.limit} caractères.`,
+        `The video's tags followed by the channel defaults — ${merged.tags.length} tags, ${merged.characters} / ${merged.limit} characters.`),
+      { italic: true, color: MUTED, size: 19 }));
+    children.push(...copyBlock(merged.tags.join(", ") || "—"));
+    // What was cut is written down rather than dropped in silence: it is the difference
+    // between a document you can trust and one you have to re-check against the app.
+    if (merged.dropped.length) {
+      children.push(body(
+        t(lang,
+          `${merged.dropped.length} tag(s) retirés pour tenir dans la limite de ${merged.limit} caractères, en partant de la fin : ${merged.dropped.join(", ")}.`,
+          `${merged.dropped.length} tag(s) dropped to fit the ${merged.limit}-character limit, starting from the end: ${merged.dropped.join(", ")}.`),
+        { italic: true, color: MUTED, size: 19 }));
+    }
 
     children.push(heading(t(lang, "10. Commentaire à épingler", "10. Comment to pin"), HeadingLevel.HEADING_1));
     children.push(...copyBlock(pack.pinnedComment || "—"));

@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element, jsx-a11y/label-has-associated-control */
 "use client";
 import { connectionLostMessage, serverErrorMessage } from "./lib/errors";
+import { TAG_LIMIT, joinTags, mergeTags, parseTagList } from "./lib/tags";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ShortsStudio } from "./shorts-studio";
@@ -20,6 +21,7 @@ type Profile = {
   offer: string; duration: string; youtubeConnected: boolean; vidiqConnected: boolean;
   thumbnailSystemPrompt?: string;
   descriptionFooter?: string;
+  defaultTags?: string;
 };
 
 type Chapter = {
@@ -796,7 +798,7 @@ export default function ScriptStudio() {
           options: pack.options.map(option => ({ id: option.id, register: option.register, title: option.title, description: option.description, overlay: option.overlay, concepts: option.concepts })),
           selected: project.packaging?.selected ?? {},
           description: pack.improvedDescription,
-          tags: pack.tags,
+          tags: { ...mergeTags(pack.tags, profile.defaultTags ?? ""), limit: TAG_LIMIT },
           pinnedComment: pack.pinnedComment ?? "",
           quiz: pack.quiz.map(item => ({ question: item.question, options: item.options ?? [], correctOption: item.correctOption ?? 0 })),
           scores: project.packaging?.vidiqScores ?? {},
@@ -1242,6 +1244,10 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
   brandLogo: { key: string; url: string } | null; reloadLogo: () => void; showToast: (message: string, kind?: AlertKind) => void; done: () => void;
 }) {
   const field = (key: keyof Profile, value: string | boolean) => setProfile({ ...profile, [key]: value });
+  // Shown live: how much of YouTube's 500-character budget the defaults already spend,
+  // so it is obvious before export how much is left for a video's own tags.
+  const defaultTagList = parseTagList(profile.defaultTags ?? "");
+  const defaultTagBudget = { count: defaultTagList.length, characters: joinTags(defaultTagList).length };
   const selectedModel = openRouterModels.find(model => model.id === aiSettings.openrouterModel);
   const writerModels = openRouterModels.filter(supportsHighReasoning);
   const selectedWriterModel = writerModels.find(model => model.id === aiSettings.writerModel);
@@ -1479,6 +1485,13 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
       {profile.thumbnailSystemPrompt && <div className="prompt-iteration"><label><span>{lang === "fr" ? "Demander une amélioration" : "Request an improvement"}</span><input value={iteration} onChange={event => setIteration(event.target.value)} placeholder={lang === "fr" ? "Ex. plus de contraste, moins de texte, visages plus naturels…" : "E.g. more contrast, less text, more natural faces…"} /></label><button onClick={() => generateEditorialPrompt(true)} disabled={styleLoading || !iteration.trim()}>↻ {lang === "fr" ? "Itérer avec l’IA" : "Iterate with AI"}</button></div>}
       <p className="privacy-note">⌕ {lang === "fr" ? "Les références sont stockées dans votre espace privé. Elles servent à l’analyse et sont envoyées à OpenAI comme références lorsque vous générez une miniature." : "References are stored in your private workspace. They are used for analysis and sent to OpenAI as references when generating a thumbnail."}</p>
     </section>
+    <section className="form-section protected description-footer-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Tags par défaut de la chaîne" : "Channel default tags"}</h2><p>{lang === "fr" ? "Ajoutés après les tags propres à la vidéo, dans le document Word exporté." : "Added after the video’s own tags, in the exported Word document."}</p></div><span>{defaultTagBudget.characters} / {TAG_LIMIT}</span></div>
+      <label className="description-footer-editor"><span>{lang === "fr" ? "Séparés par des virgules ou des retours à la ligne" : "Separated by commas or line breaks"}</span><textarea value={profile.defaultTags ?? ""} onChange={event => field("defaultTags", event.target.value)} rows={3} placeholder={lang === "fr" ? "intelligence artificielle, ia afrique, envol ia, formation ia…" : "artificial intelligence, ai africa, ai training…"} /><small>{lang === "fr" ? "YouTube limite le champ des tags à 500 caractères au total. Si l’ensemble dépasse, les derniers tags sont retirés — donc ceux-ci avant ceux de la vidéo." : "YouTube caps the tags field at 500 characters in total. If the whole set overflows, the last tags are dropped — so these before the video’s own."}</small></label>
+      <div className="description-footer-actions"><span>{defaultTagBudget.count > 0
+        ? (lang === "fr" ? `${defaultTagBudget.count} tags par défaut · ${Math.max(0, TAG_LIMIT - defaultTagBudget.characters)} caractères restants pour la vidéo` : `${defaultTagBudget.count} default tags · ${Math.max(0, TAG_LIMIT - defaultTagBudget.characters)} characters left for the video`)
+        : (lang === "fr" ? "Aucun tag par défaut : le document ne portera que les tags de la vidéo." : "No default tags: the document will carry only the video’s own.")}</span></div>
+    </section>
+
     <section className="form-section protected description-footer-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Bloc automatique de description" : "Automatic description block"}</h2><p>{lang === "fr" ? "Ajouté mot pour mot à la fin de chaque description améliorée." : "Added word for word at the end of every improved description."}</p></div><span>⌕ {lang === "fr" ? "AUTOMATIQUE" : "AUTOMATIC"}</span></div>
       <label className="description-footer-editor"><span>{lang === "fr" ? "Coordonnées, liens et appel à l’action" : "Contact details, links, and call to action"}</span><textarea value={profile.descriptionFooter ?? ""} onChange={event => field("descriptionFooter", event.target.value)} rows={5} placeholder={lang === "fr" ? "Ajoutez ici le texte qui doit apparaître automatiquement dans toutes vos descriptions…" : "Add the text that should automatically appear in all your descriptions…"} /><small>{lang === "fr" ? "Les sauts de ligne, emojis, numéros et liens sont conservés exactement. Laissez ce champ vide pour ne rien ajouter." : "Line breaks, emojis, phone numbers, and links are preserved exactly. Leave this empty to add nothing."}</small></label>
       <div className="description-footer-actions"><button type="button" onClick={() => field("descriptionFooter", profileDemo.descriptionFooter ?? "")}>{lang === "fr" ? "Restaurer le bloc Envol IA" : "Restore Envol IA block"}</button><span>{lang === "fr" ? "Ce bloc n’est jamais reformulé par l’IA." : "This block is never rewritten by AI."}</span></div>
