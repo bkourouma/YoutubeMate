@@ -311,6 +311,8 @@ export default function ScriptStudio() {
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [referenceThumbnails, setReferenceThumbnails] = useState<ReferenceThumbnail[]>([]);
   const [presenterPhoto, setPresenterPhoto] = useState<{ key: string; url: string } | null>(null);
+  const [brandLogo, setBrandLogo] = useState<{ key: string; url: string } | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [activeId, setActiveId] = useState(demoProjects[0].id);
   const [auto, setAuto] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -412,8 +414,14 @@ export default function ScriptStudio() {
       .then(data => setPresenterPhoto(data.photo ?? null)).catch(() => null);
   }, []);
 
+  const loadBrandLogo = useCallback(() => {
+    fetch("/api/brand-logo").then(response => response.json() as Promise<{ logo?: { key: string; url: string } | null }>)
+      .then(data => setBrandLogo(data.logo ?? null)).catch(() => null);
+  }, []);
+
   useEffect(() => { loadReferenceThumbnails(); }, [loadReferenceThumbnails]);
   useEffect(() => { loadPresenterPhoto(); }, [loadPresenterPhoto]);
+  useEffect(() => { loadBrandLogo(); }, [loadBrandLogo]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -754,10 +762,56 @@ export default function ScriptStudio() {
     updateProject({ step: number });
   };
 
-  const download = () => {
-    const content = `# ${project.title}\n\n## Idée & angle\n${project.subject}\n\n## Script continu\n${script}\n\n## Verdict\nTextes fixes : conforme · Faits non vérifiés : aucun ajouté\n\n## Packaging\nVoir les options A/B/C dans YoutubeMate.`;
-    const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
-    const a = document.createElement("a"); a.href = url; a.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.md`; a.click(); URL.revokeObjectURL(url);
+  const download = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      // Loaded on demand: the Word writer is only needed by people who export.
+      const { buildWordDocument } = await import("./lib/word-export");
+      let logo: { data: ArrayBuffer; type: "png" | "jpg" } | null = null;
+      if (brandLogo) {
+        const response = await fetch(brandLogo.url);
+        if (response.ok) logo = { data: await response.arrayBuffer(), type: response.headers.get("content-type")?.includes("png") ? "png" : "jpg" };
+      }
+      // The body carries "CHAPITRE n — TITLE" markers; splitting on them turns each
+      // chapter into its own Word heading, so the navigation pane mirrors the plan.
+      const parts = project.body.split(/^(CHAPITRE\s+\d+[^\n]*)$/gim);
+      const bodyByChapter: Array<{ heading: string; text: string }> = [];
+      for (let index = 1; index < parts.length; index += 2) bodyByChapter.push({ heading: parts[index].trim(), text: parts[index + 1] ?? "" });
+      const pack = project.packaging?.package;
+      const blob = await buildWordDocument({
+        lang, company: profile.channel, logo,
+        title: project.title, subject: project.subject, status: project.status, updated: project.updated, step: project.step,
+        hook: project.hook, promise: project.promise, conclusion: project.conclusion,
+        chapters: project.chapters.map(chapter => ({ title: chapter.title, objective: chapter.objective, keyPoints: chapter.keyPoints, targetWords: chapter.targetWords })),
+        bodyByChapter, bodyIntro: parts[0] ?? "",
+        fixed: { presentation: profile.presentation, launch: profile.launch, closing: profile.closing },
+        meta: {
+          audience: profile.audience, tone: profile.tone, duration: profile.duration, theme: profile.theme,
+          words: wordCount(script),
+          models: [aiSettings.writerModel, aiSettings.openrouterModel, aiSettings.imageModel].filter(Boolean).join(" · "),
+        },
+        timecodes: estimatedTimecodes(project, profile),
+        packaging: pack ? {
+          options: pack.options.map(option => ({ id: option.id, register: option.register, title: option.title, description: option.description, overlay: option.overlay, concepts: option.concepts })),
+          selected: project.packaging?.selected ?? {},
+          description: pack.improvedDescription,
+          tags: pack.tags,
+          pinnedComment: pack.pinnedComment ?? "",
+          quiz: pack.quiz.map(item => ({ question: item.question, options: item.options ?? [], correctOption: item.correctOption ?? 0 })),
+          scores: project.packaging?.vidiqScores ?? {},
+        } : null,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "projet"}.docx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast(lang === "fr" ? "Document Word téléchargé" : "Word document downloaded");
+    } catch (error) {
+      showToast(serverErrorMessage(error, lang), "error");
+    } finally { setExporting(false); }
   };
 
   if (prompter) return <Prompter script={script} title={project.title} close={() => setPrompter(false)} t={t} copy={copy} />;
@@ -790,7 +844,7 @@ export default function ScriptStudio() {
               : saveState === "too-large" ? (lang === "fr" ? "Non sauvegardé : projet trop volumineux" : "Not saved: project too large")
               : (lang === "fr" ? "Non sauvegardé — vérifiez votre connexion" : "Not saved — check your connection")
             }</div></div>
-            <div className="top-actions"><label className="pilot-switch"><span>{t.pilot}</span><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /><i /></label><button className="secondary" onClick={() => setPrompter(true)}>▣ {t.script}</button><button className="dark-button" onClick={download}>↓ {t.export}</button></div>
+            <div className="top-actions"><label className="pilot-switch"><span>{t.pilot}</span><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /><i /></label><button className="secondary" onClick={() => setPrompter(true)}>▣ {t.script}</button><button className="dark-button" onClick={download} disabled={exporting}>↓ {exporting ? (lang === "fr" ? "Préparation…" : "Preparing…") : t.export}</button></div>
           </header>
           <section className="stepper" aria-label="Pipeline">
             {t.steps.map((label, index) => { const number = index + 1; const state: StepState = project.step === number ? "active" : project.completed.includes(number) ? "done" : "todo"; return <button key={label} className={`step ${state}`} onClick={() => navigateStep(number)}><span>{state === "done" ? "✓" : number}</span><small>{label}</small></button>; })}
@@ -811,7 +865,7 @@ export default function ScriptStudio() {
         {view === "shorts-express" && <ShortsExpress lang={lang} openrouterReady={integrations.openrouter.configured} openaiReady={integrations.openai.configured} writerModel={aiSettings.writerModel} imageModel={aiSettings.imageModel} imageQuality={aiSettings.imageQuality} channel={profile.channel} thumbnailSystemPrompt={profile.thumbnailSystemPrompt ?? ""} referenceKeys={referenceThumbnails.map(reference => reference.key)} presenterKey={presenterPhoto?.key ?? ""} profile={{ channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, descriptionFooter: profile.descriptionFooter }} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
         {view === "express" && <ExpressPackagingAI value={express} setValue={editExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterPhoto?.key ?? ""} openAiSettings={() => setView("profile")} />}
-        {view === "profile" && <ProfilePageAI profile={profile} setProfile={editProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} youtube={youtube} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} presenterPhoto={presenterPhoto} reloadPresenter={loadPresenterPhoto} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
+        {view === "profile" && <ProfilePageAI profile={profile} setProfile={editProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} youtube={youtube} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} presenterPhoto={presenterPhoto} reloadPresenter={loadPresenterPhoto} brandLogo={brandLogo} reloadLogo={loadBrandLogo} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
       </main>
       {newOpen && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title"><button className="modal-close" onClick={() => setNewOpen(false)}>×</button><span className="eyebrow">{lang === "fr" ? "NOUVEAU PROJET" : "NEW PROJECT"}</span><h2 id="new-project-title">{t.addSubject}</h2><p>{lang === "fr" ? "Soyez précis : le studio ne recherchera jamais une catégorie plus large." : "Be specific: the studio will never research a broader category."}</p><textarea value={newSubject} maxLength={2000} onChange={e => setNewSubject(e.target.value)} placeholder={lang === "fr" ? "Ex. Comment utiliser l’IA pour répondre aux clients sur WhatsApp Business" : "E.g. How to use AI to answer customers on WhatsApp Business"} /><div className="modal-actions"><button className="ghost" onClick={() => setNewOpen(false)}>{t.cancel}</button><button className="primary" onClick={createProject}>{t.create} →</button></div></div></div>}
       {alerts.length > 0 && <div className="alert-stack" aria-live="polite" aria-relevant="additions" onMouseEnter={() => setAlertsPaused(true)} onMouseLeave={() => setAlertsPaused(false)} onFocusCapture={() => setAlertsPaused(true)} onBlurCapture={() => setAlertsPaused(false)}>
@@ -1181,10 +1235,11 @@ async function optimizeImage(file: File, maxWidth: number, maxHeight: number) {
   } catch { return file; }
 }
 
-function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, integrations, youtube, refreshIntegrations, legacyKeysFound, clearLegacyKeys, openRouterModels, referenceThumbnails, reloadReferences, presenterPhoto, reloadPresenter, showToast, done }: {
+function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings, integrations, youtube, refreshIntegrations, legacyKeysFound, clearLegacyKeys, openRouterModels, referenceThumbnails, reloadReferences, presenterPhoto, reloadPresenter, brandLogo, reloadLogo, showToast, done }: {
   profile: Profile; setProfile: (p: Profile) => void; lang: Lang; t: (typeof labels)[Lang];
   aiSettings: AiSettings; setAiSettings: (settings: AiSettings) => void; integrations: Integrations; youtube: YoutubeState; refreshIntegrations: () => void; legacyKeysFound: boolean; clearLegacyKeys: () => void; openRouterModels: OpenRouterModel[];
-  referenceThumbnails: ReferenceThumbnail[]; reloadReferences: () => void; presenterPhoto: { key: string; url: string } | null; reloadPresenter: () => void; showToast: (message: string, kind?: AlertKind) => void; done: () => void;
+  referenceThumbnails: ReferenceThumbnail[]; reloadReferences: () => void; presenterPhoto: { key: string; url: string } | null; reloadPresenter: () => void;
+  brandLogo: { key: string; url: string } | null; reloadLogo: () => void; showToast: (message: string, kind?: AlertKind) => void; done: () => void;
 }) {
   const field = (key: keyof Profile, value: string | boolean) => setProfile({ ...profile, [key]: value });
   const selectedModel = openRouterModels.find(model => model.id === aiSettings.openrouterModel);
@@ -1196,6 +1251,39 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
   const [uploading, setUploading] = useState(false);
   const [iteration, setIteration] = useState("");
   const [presenterUploading, setPresenterUploading] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const uploadLogo = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    setLogoUploading(true);
+    try {
+      const form = new FormData();
+      // Not re-encoded in the browser: a logo's transparency is the point, and the
+      // JPEG conversion the presenter photo goes through would flatten it onto black.
+      form.append("file", file);
+      const response = await fetch("/api/brand-logo", { method: "POST", body: form });
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(data.error || `http_${response.status}`);
+      reloadLogo();
+      showToast(lang === "fr" ? "Logo enregistré" : "Logo saved");
+    } catch (error) {
+      const code = error instanceof TypeError ? "network" : error instanceof Error ? error.message : "unknown";
+      showToast(code === "invalid_logo_file"
+        ? (lang === "fr" ? "Format refusé. Word n’intègre que le PNG et le JPEG — un SVG doit être exporté en PNG d’abord. Taille maximale 4 Mo."
+          : "Format refused. Word only embeds PNG and JPEG — export an SVG to PNG first. Maximum size 4 MB.")
+        : serverErrorMessage(error, lang), "error");
+    } finally { setLogoUploading(false); }
+  };
+  const removeLogo = async () => {
+    setLogoUploading(true);
+    try {
+      const response = await fetch("/api/brand-logo", { method: "DELETE" });
+      if (!response.ok) throw new Error("logo_delete_failed");
+      reloadLogo();
+      showToast(lang === "fr" ? "Logo retiré" : "Logo removed");
+    } catch (error) { showToast(serverErrorMessage(error, lang), "error"); }
+    finally { setLogoUploading(false); }
+  };
   const uploadPresenter = async (files: FileList | null) => {
     const file = files?.[0];
     if (!file) return;
@@ -1355,6 +1443,21 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
       </div>
       <p className="privacy-note strong-privacy">⌕ {lang === "fr" ? "Vos clés sont chiffrées (AES-GCM) côté serveur et liées à votre compte. Elles ne sont jamais renvoyées au navigateur ni ajoutées aux projets : seuls les quatre derniers caractères sont affichés. Supprimez-les à tout moment depuis cet écran." : "Your keys are encrypted (AES-GCM) server-side and tied to your account. They are never returned to the browser or added to projects: only the last four characters are shown. Remove them at any time from this screen."}</p>
     </section>
+    <section className="form-section presenter-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Logo de l’entreprise" : "Company logo"}</h2><p>{lang === "fr" ? "Placé en tête des documents Word exportés, à côté du nom de la chaîne. PNG ou JPEG — un PNG à fond transparent donne le meilleur rendu dans Word." : "Placed at the top of exported Word documents, next to the channel name. PNG or JPEG — a transparent PNG renders best in Word."}</p></div><span className="reference-count">{brandLogo ? (lang === "fr" ? "LOGO ACTIF" : "LOGO ACTIVE") : (lang === "fr" ? "AUCUN LOGO" : "NO LOGO")}</span></div>
+      <div className="presenter-row">
+        {brandLogo
+          ? <img className="presenter-preview brand-logo-preview" src={brandLogo.url} alt={lang === "fr" ? "Logo de l’entreprise" : "Company logo"} />
+          : <div className="presenter-empty">{lang === "fr" ? "Aucun logo" : "No logo"}</div>}
+        <div className="presenter-actions">
+          <label className="presenter-upload">{logoUploading ? (lang === "fr" ? "Envoi…" : "Uploading…") : brandLogo ? (lang === "fr" ? "Remplacer le logo" : "Replace logo") : (lang === "fr" ? "Ajouter le logo" : "Add logo")}
+            <input type="file" accept="image/png,image/jpeg" disabled={logoUploading} onChange={event => uploadLogo(event.target.files)} />
+          </label>
+          {brandLogo && <button type="button" className="danger" onClick={removeLogo} disabled={logoUploading}>{lang === "fr" ? "Retirer" : "Remove"}</button>}
+          <p>{lang === "fr" ? "Sans logo, le document porte le nom de la chaîne seul. Le logo n’est jamais envoyé à un modèle d’IA : il ne sert qu’aux exports." : "Without a logo, the document carries the channel name alone. The logo is never sent to an AI model: it is only used for exports."}</p>
+        </div>
+      </div>
+    </section>
+
     <section className="form-section presenter-section"><div className="section-heading"><div><h2>{lang === "fr" ? "Votre photo dans les miniatures" : "Your photo in thumbnails"}</h2><p>{lang === "fr" ? "Ajoutez une photo de vous nette et bien éclairée. Elle sera intégrée aux miniatures générées, cadrée selon le format : de côté en 16:9, verticalement en 9:16 pour les Shorts." : "Add a sharp, well-lit photo of yourself. It is composed into generated thumbnails, framed for the format: to one side in 16:9, vertically in 9:16 for Shorts."}</p></div><span className="reference-count">{presenterPhoto ? (lang === "fr" ? "PHOTO ACTIVE" : "PHOTO ACTIVE") : (lang === "fr" ? "AUCUNE PHOTO" : "NO PHOTO")}</span></div>
       <div className="presenter-row">
         {presenterPhoto

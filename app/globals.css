@@ -265,6 +265,11 @@ button { cursor:pointer; }
 .presenter-row { display:grid; grid-template-columns:120px minmax(0,1fr); gap:16px; align-items:start; }
 .presenter-preview { width:120px; aspect-ratio:3/4; object-fit:cover; border-radius:9px; border:1px solid var(--line); background:#f3f7f4; }
 .presenter-empty { width:120px; aspect-ratio:3/4; display:grid; place-items:center; border:1px dashed #c9d3cd; border-radius:9px; color:#9aa5a0; font-size:10px; background:#fafbfa; }
+/* A logo is shown whole, not cropped to a portrait: contain, on a square, over a
+   chequer so a transparent background reads as transparent rather than as white. */
+.brand-logo-preview { aspect-ratio:1; object-fit:contain; padding:8px; background:
+  linear-gradient(45deg,#eef1f0 25%,transparent 25%,transparent 75%,#eef1f0 75%) 0 0/14px 14px,
+  linear-gradient(45deg,#eef1f0 25%,#fff 25%,#fff 75%,#eef1f0 75%) 7px 7px/14px 14px; }
 .presenter-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .presenter-actions p { flex-basis:100%; margin:2px 0 0; color:#8b968f; font-size:10px; line-height:1.55; }
 .presenter-upload { border:1px solid var(--line); border-radius:7px; background:#fff; color:#4f5f57; padding:9px 12px; font-size:10.5px; font-weight:700; cursor:pointer; }

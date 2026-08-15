@@ -931,3 +931,41 @@ test("accepts the presenter photo, which lives under its own prefix", { concurre
     assert.equal((await response.json()).error, "reference_forbidden");
   }
 });
+
+test("exports the whole project as a Word document built for copy-paste", async () => {
+  const [word, studio, logoRoute, packageJson] = await Promise.all([
+    readFile(new URL("../app/lib/word-export.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/brand-logo/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ]);
+  // The old export wrote three headings and told the reader to go look in the app.
+  assert.doesNotMatch(studio, /Voir les options A\/B\/C dans YoutubeMate/);
+  assert.doesNotMatch(studio, /text\/markdown;charset=utf-8/);
+  assert.match(studio, /\.docx`/);
+  // Every stage of the work has to appear, not just the script.
+  for (const section of [
+    "Recherche & angle", "Hook & promesse", "Plan de chapitres", "Script complet",
+    "Conclusion & CTA", "Timecodes de chapitres", "Packaging — test A/B/C",
+    "Description YouTube", "Tags", "Commentaire à épingler", "Quiz",
+  ]) assert.ok(word.includes(section), `the document is missing "${section}"`);
+  // Copy-paste is the point: pasted blocks carry no bullet or marker, and each line is
+  // its own plain paragraph so a selection yields exactly what the YouTube field wants.
+  assert.match(word, /function copyBlock/);
+  assert.doesNotMatch(word, /bullet:/);
+  // Real Word headings, so the navigation pane mirrors the chapter plan.
+  assert.match(word, /HeadingLevel\.HEADING_1/);
+  assert.match(word, /HeadingLevel\.HEADING_2/);
+  assert.match(studio, /project\.body\.split\(\/\^\(CHAPITRE/);
+  // Branding: the logo is embedded, and the document still works without one.
+  assert.match(word, /ImageRun/);
+  assert.match(word, /if \(input\.logo\)/);
+  assert.match(word, /input\.company \|\| "YoutubeMate"/);
+  // Word embeds PNG and JPEG only; refusing anything else at upload beats a document
+  // that silently comes out logo-less.
+  assert.match(logoRoute, /new Set\(\["image\/png", "image\/jpeg"\]\)/);
+  assert.match(logoRoute, /brand-logo\/\$\{encodeURIComponent/);
+  // Loaded on demand, like the CapCut kit: only exporters pay for the writer.
+  assert.match(studio, /await import\("\.\/lib\/word-export"\)/);
+  assert.match(packageJson, /"docx"/);
+});
