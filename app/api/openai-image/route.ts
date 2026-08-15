@@ -17,8 +17,15 @@ type ImageRequest = {
 
 const ALLOWED_MODELS = new Set(["gpt-image-2", "gpt-image-1.5"]);
 
+// Two kinds of image, two prefixes. The presenter photo is written by the
+// presenter-photo route under its own namespace, so checking it against the style
+// prefix rejected every request that carried a face — which is every request that
+// could have produced a likeness.
 function referencePrefix(userId: string) {
   return `reference-thumbnails/${encodeURIComponent(userId)}/`;
+}
+function presenterPrefix(userId: string) {
+  return `presenter-photo/${encodeURIComponent(userId)}/`;
 }
 
 export async function POST(request: Request) {
@@ -66,9 +73,13 @@ export async function POST(request: Request) {
     const size = framing.size;
     let response: Response;
     if (requestedReferences.length) {
-      // Ownership check: a key outside this user's prefix is never fetched.
-      const prefix = referencePrefix(userId);
-      if (requestedReferences.some(key => !key.startsWith(prefix))) return Response.json({ error: "reference_forbidden" }, { status: 403 });
+      // Ownership check: every key is matched against the prefix of its own kind, so a
+      // key belonging to another user — or a style key smuggled in as the presenter —
+      // is never fetched.
+      const styleKeys = requestedReferences.slice(presenterKey ? 1 : 0);
+      const ownsEverything = (!presenterKey || presenterKey.startsWith(presenterPrefix(userId)))
+        && styleKeys.every(key => key.startsWith(referencePrefix(userId)));
+      if (!ownsEverything) return Response.json({ error: "reference_forbidden" }, { status: 403 });
       // Resolved lazily so the route stays loadable outside workerd; only the
       // reference-image branch needs R2 at all.
       const { env } = await import("cloudflare:workers");

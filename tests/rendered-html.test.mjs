@@ -900,3 +900,34 @@ test("makes the photograph the only source of the presenter's face", async () =>
   // A real face to preserve buys fewer competing style images.
   assert.match(image, /const styleBudget = presenterKey \? 2 : 4/);
 });
+
+test("accepts the presenter photo, which lives under its own prefix", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("presenter-ownership-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const call = (payload) => worker.fetch(
+    new Request("http://localhost/api/openai-image", { method: "POST", headers: signedIn, body: JSON.stringify(payload) }),
+    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  const base = { model: "gpt-image-2", pipeline: "script", prompt: "A polished thumbnail of a padlock beside a laptop." };
+  const mine = "presenter-photo/test-user/face.jpg";
+  const myStyle = "reference-thumbnails/test-user/style.png";
+
+  // The bug: both kinds were checked against the reference-thumbnails prefix, so every
+  // request carrying a face was refused — the only requests that could produce a likeness.
+  const withFace = await call({ ...base, presenterKey: mine, referenceKeys: [myStyle] });
+  assert.notEqual(withFace.status, 403, "the user's own presenter photo must not be refused");
+
+  // Ownership still holds on both sides, each against the prefix of its own kind.
+  for (const [label, payload] of [
+    ["another account's photo", { ...base, presenterKey: "presenter-photo/someone-else/face.jpg" }],
+    ["another account's style image", { ...base, referenceKeys: ["reference-thumbnails/someone-else/style.png"] }],
+    // A style key passed off as the presenter must not inherit the presenter's prefix.
+    ["a style key smuggled in as the presenter", { ...base, presenterKey: myStyle }],
+  ]) {
+    const response = await call(payload);
+    assert.equal(response.status, 403, `${label} must be refused`);
+    assert.equal((await response.json()).error, "reference_forbidden");
+  }
+});
