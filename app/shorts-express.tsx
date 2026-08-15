@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { serverErrorMessage } from "./lib/errors";
+import { productName } from "./config/product";
 
 type Lang = "fr" | "en";
 type AlertKind = "success" | "warning" | "error";
@@ -164,7 +165,7 @@ export function ShortsExpress({ lang, openrouterReady, openaiReady, writerModel,
         <p>{lang === "fr" ? "Pour les shorts déjà tournés et montés : d’un titre de travail à son titre optimisé, sa description, ses tags et sa miniature verticale. Aucune transcription requise." : "For shorts already shot and edited: from a working title to its optimised title, description, tags and vertical thumbnail. No transcript needed."}</p>
       </div></div>
 
-      {!openrouterReady && <div className="shorts-setup-notice"><span>!</span><div><strong>{lang === "fr" ? "Clé OpenRouter requise" : "OpenRouter key required"}</strong><p>{lang === "fr" ? "Le même compte que le reste de YoutubeMate." : "The same account as the rest of YoutubeMate."}</p></div><button onClick={openSettings}>{lang === "fr" ? "Configurer" : "Configure"} →</button></div>}
+      {!openrouterReady && <div className="shorts-setup-notice"><span>!</span><div><strong>{lang === "fr" ? "Clé OpenRouter requise" : "OpenRouter key required"}</strong><p>{lang === "fr" ? `Le même compte que le reste de ${productName}.` : `The same account as the rest of ${productName}.`}</p></div><button onClick={openSettings}>{lang === "fr" ? "Configurer" : "Configure"} →</button></div>}
 
       <section className="shorts-source">
         <div className="shorts-route-choice">

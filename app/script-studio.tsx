@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ShortsStudio } from "./shorts-studio";
 import { CreditsUsage } from "./credits-usage";
 import { ShortsExpress } from "./shorts-express";
+import { product } from "./config/product";
 
 type Lang = "fr" | "en";
 type View = "studio" | "shorts" | "express" | "shorts-express" | "projects" | "usage" | "profile";
@@ -833,7 +834,7 @@ export default function ScriptStudio() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand" onClick={() => setView("studio")} aria-label="YoutubeMate"><span className="brand-mark">Y</span><span>YoutubeMate<small>Creator workspace</small></span></button>
+        <button className="brand" onClick={() => setView("studio")} aria-label={product.name}><span className="brand-mark">{product.name.slice(0, 1)}</span><span>{product.name}<small>{product.tagline}</small></span></button>
         <button className="new-video" onClick={() => setNewOpen(true)}><span>＋</span>{t.newVideo}</button>
         <nav>
           <NavButton active={view === "studio"} icon="✍" label={t.studio} hint={t.hintStudio} onClick={() => setView("studio")} />
@@ -1483,7 +1484,7 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
               ? <button type="button" className="danger" onClick={() => removeSecret("youtube")}>{lang === "fr" ? "Déconnecter" : "Disconnect"}</button>
               : <a className="connect-link" href="/api/youtube/auth">{lang === "fr" ? "Connecter YouTube" : "Connect YouTube"} →</a>}
           </div>
-          <p className="credential-note">{lang === "fr" ? "L’autorisation passe par la page sécurisée de Google. YoutubeMate ne reçoit jamais votre mot de passe, et demande uniquement le droit d’envoyer des vidéos." : "Authorisation happens on Google’s own page. YoutubeMate never sees your password, and only requests the right to upload videos."}</p>
+          <p className="credential-note">{lang === "fr" ? `L’autorisation passe par la page sécurisée de Google. ${product.name} ne reçoit jamais votre mot de passe, et demande uniquement le droit d’envoyer des vidéos.` : `Authorisation happens on Google’s own page. ${product.name} never sees your password, and only requests the right to upload videos.`}</p>
         </div>
       </div>
       <div className="model-grid">

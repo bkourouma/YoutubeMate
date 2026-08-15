@@ -1,3 +1,4 @@
+import { product } from "../config/product";
 /**
  * Every outbound call gets a deadline. Without one a hung provider holds a Worker
  * request open until the platform kills it, and the user sees nothing but a spinner.
@@ -20,6 +21,6 @@ export function openRouterHeaders(apiKey: string) {
     authorization: `Bearer ${apiKey}`,
     "content-type": "application/json",
     "http-referer": (process.env.PUBLIC_APP_ORIGIN?.trim() || "https://youtubemate.local").replace(/\/+$/, "") + "/",
-    "x-title": "YoutubeMate",
+    "x-title": product.name,
   };
 }
