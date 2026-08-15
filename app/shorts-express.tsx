@@ -2,6 +2,7 @@
 "use client";
 
 import { useState } from "react";
+import { serverErrorMessage } from "./lib/errors";
 
 type Lang = "fr" | "en";
 type AlertKind = "success" | "warning" | "error";
@@ -74,7 +75,7 @@ export function ShortsExpress({ lang, openrouterReady, openaiReady, writerModel,
       setRows([{ originalTitle: title, package: result, selectedTitle: bestOf(result.titles).title, selectedConcept: 0 }]);
       showToast(lang === "fr" ? "Package prêt" : "Package ready");
     } catch (error) {
-      showToast(error instanceof TypeError ? connectionLost(lang) : error instanceof Error ? error.message : (lang === "fr" ? "Le packaging a échoué." : "Packaging failed."), "error");
+      showToast(error instanceof Error ? serverErrorMessage(error, lang, "openrouter") : (lang === "fr" ? "Le packaging a échoué." : "Packaging failed."), "error");
     } finally { setBusy(false); }
   };
 

@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { serverErrorMessage } from "./lib/errors";
 
 export type ShortsSequence = { startTime: string; endTime: string };
 export type ShortItem = {
@@ -118,7 +119,7 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
   };
 
   const failure = (error: unknown, fallback: string) => {
-    showToast(error instanceof TypeError ? connectionLost(lang) : error instanceof Error ? error.message : fallback, "error");
+    showToast(error instanceof Error ? serverErrorMessage(error, lang, "openrouter") : fallback, "error");
   };
 
   const requireKey = () => {

@@ -788,3 +788,37 @@ test("bounds every AI call and resumes an interrupted body without losing paid c
   assert.match(studio, /CHAPITRE \$\{index \+ 1\} — \$\{chapters\[index\]\.title\.toUpperCase\(\)\}/);
   assert.match(studio, /project\.body\.split\(\/CHAPITRE\\s\+\\d\+\/i\)/);
 });
+
+test("turns server error codes into an instruction, never a bare code", async () => {
+  const { serverErrorMessage } = await import("../app/lib/errors.ts");
+  // The failure the user actually hit: a missing key announced as
+  // "OpenRouter : integration_not_configured", which names the problem and not the fix.
+  const missing = serverErrorMessage(new Error("integration_not_configured"), "fr", "openrouter");
+  assert.match(missing, /OpenRouter/);
+  assert.match(missing, /Clés & connexions/);
+  assert.doesNotMatch(missing, /integration_not_configured/);
+  assert.match(serverErrorMessage(new Error("integration_not_configured"), "en", "openai"), /Keys & connections/);
+  // The screen it sends the user to must exist under that exact name, or the
+  // instruction is confidently wrong.
+  const [errors, studio, shortsStudio, shortsExpress] = await Promise.all([
+    readFile(new URL("../app/lib/errors.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/shorts-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/shorts-express.tsx", import.meta.url), "utf8"),
+  ]);
+  for (const [menu, settings] of [["fr", "Ma chaîne & réglages"], ["en", "My channel & settings"]]) {
+    assert.ok(errors.includes(settings), `errors.ts points at a settings screen named otherwise (${menu})`);
+    assert.ok(studio.includes(`profile: "${settings}"`), `the ${menu} menu no longer carries that name`);
+  }
+  // A sentence the server already wrote in the user's language passes through untouched.
+  const written = "La génération du packaging a dépassé le délai autorisé. Relancez la génération.";
+  assert.equal(serverErrorMessage(new Error(written), "fr", "openrouter"), written);
+  // An unrecognised code still names the service and stays readable.
+  assert.equal(serverErrorMessage(new Error("some_new_code"), "fr", "openai"), "OpenAI : erreur some_new_code.");
+  assert.match(serverErrorMessage(new TypeError("Failed to fetch"), "fr"), /connexion au serveur/);
+  // No AI call site may format a raw code into an alert again.
+  for (const [name, source] of [["script-studio", studio], ["shorts-studio", shortsStudio], ["shorts-express", shortsExpress]]) {
+    const rawInAlert = source.match(/showToast\([^;]*error instanceof Error \? error\.message/g) ?? [];
+    assert.deepEqual(rawInAlert, [], `${name} shows a raw server code in an alert`);
+  }
+});
