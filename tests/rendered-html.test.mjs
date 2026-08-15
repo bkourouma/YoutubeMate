@@ -1459,3 +1459,39 @@ test("states the licence it is actually under, and keeps contributing cheap", as
   assert.doesNotMatch(contributing, /no external contribution is being merged/, "contributions are open now");
   assert.match(template, /git commit -s/);
 });
+
+test("resolves a local identity without the proxy header, and never in production", async () => {
+  // Tested against the module rather than the built worker: the bundler folds NODE_ENV to
+  // a constant and eliminates the branch entirely — DEV_USER_ID does not appear anywhere
+  // in dist/. That is a stronger guarantee than a runtime check, and it is also why the
+  // built artifact cannot demonstrate the development side of this.
+  const { providerFor, devUserId } = await import("../app/server/auth.ts");
+  const noHeaders = { get: () => null };
+  const withHeader = { get: name => (name === "oai-authenticated-user-id" ? "proxy-user" : null) };
+  const previousUser = process.env.DEV_USER_ID;
+  const previousEnv = process.env.NODE_ENV;
+  try {
+    process.env.DEV_USER_ID = "local-developer";
+    delete process.env.NODE_ENV;
+    // Nothing sets the header on a developer's machine. The first version of this refactor
+    // dropped the fallback and 401'd every route locally, and every test passed anyway
+    // because they all send the header.
+    assert.equal(providerFor("trusted-proxy-header").identify(noHeaders), "local-developer");
+    // A real header still wins over the fallback.
+    assert.equal(providerFor("trusted-proxy-header").identify(withHeader), "proxy-user");
+    // In dev mode the header is ignored outright: locally it is attacker-controlled.
+    assert.equal(providerFor("dev").identify(withHeader), "local-developer");
+    // No provider has been chosen for hosted sessions, so it fails closed rather than
+    // guessing an id and handing out that account's encrypted keys.
+    assert.equal(providerFor("hosted-session").identify(withHeader), null);
+
+    process.env.NODE_ENV = "production";
+    assert.equal(devUserId(), null, "DEV_USER_ID granted an identity in production");
+    assert.equal(providerFor("trusted-proxy-header").identify(noHeaders), null);
+    // The proxy header keeps working in production — that is the deployed contract.
+    assert.equal(providerFor("trusted-proxy-header").identify(withHeader), "proxy-user");
+  } finally {
+    if (previousUser === undefined) delete process.env.DEV_USER_ID; else process.env.DEV_USER_ID = previousUser;
+    if (previousEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousEnv;
+  }
+});

@@ -38,7 +38,10 @@ export type AuthProvider = {
 
 const trustedProxyProvider: AuthProvider = {
   mode: "trusted-proxy-header",
-  identify: headers => headers.get(TRUSTED_PROXY_HEADER) || null,
+  // The header first; DEV_USER_ID only as a fallback, and `devUserId` returns null in
+  // production. Without that fallback there is no identity at all on a developer's
+  // machine — nothing sets the header locally — and every route answers 401.
+  identify: headers => headers.get(TRUSTED_PROXY_HEADER) || devUserId(),
 };
 
 const devProvider: AuthProvider = {
