@@ -41,7 +41,12 @@ export async function POST(request: Request) {
   const editorialSystem = body.systemPrompt?.trim().slice(0, 12_000);
   const overlay = (body.overlay ?? "").slice(0, 80);
   const channel = (body.channel ?? "").slice(0, 80);
-  const composedPrompt = `${editorialSystem ? `EDITORIAL SYSTEM TO FOLLOW:\n${editorialSystem}\n\n` : ""}${prompt}\n${framing.brief} Use the uploaded reference thumbnails only to understand the recurring visual language; create an original composition and do not copy a particular thumbnail.${presenterKey ? ` ${presenterBrief(pipeline)}` : ""}${overlay ? ` Add the exact large headline: "${overlay}".` : ""}${channel ? ` Add the small channel label: "${channel}".` : ""} Do not add any other words, logos, or watermarks. Keep all essential faces, objects, and text inside a centered safe area.`;
+  // The presenter photo and the style references are both uploaded images but serve
+  // opposite purposes, so each is named: copy the face, never copy a thumbnail. The
+  // presenter instruction comes last and overrides, because an editorial system prompt
+  // written for generic stock people would otherwise erase the channel's own face.
+  const styleBrief = "The thumbnail reference images show the channel's recurring visual language: match their style, never copy a particular thumbnail's composition.";
+  const composedPrompt = `${editorialSystem ? `EDITORIAL SYSTEM TO FOLLOW:\n${editorialSystem}\n\n` : ""}${prompt}\n${framing.brief} ${styleBrief}${overlay ? ` Add the exact large headline: "${overlay}".` : ""}${channel ? ` Add the small channel label: "${channel}".` : ""} Do not add any other words, logos, or watermarks. Keep all essential faces, objects, and text inside a centered safe area.${presenterKey ? `\n\nOVERRIDING REQUIREMENT — THE PRESENTER: ${presenterBrief(pipeline)}` : ""}`;
 
   try {
     // The presenter photo travels as a reference image too, so the model can keep the

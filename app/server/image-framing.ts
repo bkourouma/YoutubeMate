@@ -40,9 +40,16 @@ export function framingFor(pipeline: Pipeline, model: string): Framing {
   };
 }
 
-/** Where the presenter belongs depends on the frame, so the instruction does too. */
+/**
+ * Where the presenter belongs depends on the frame, so the instruction does too.
+ *
+ * Stated as an override: a channel's editorial system prompt often asks for a "generic"
+ * person — sound advice for stock imagery, fatal when the creator's own face is the
+ * point. This must win over that instruction.
+ */
 export function presenterBrief(pipeline: Pipeline) {
+  const identity = "The FIRST supplied image is a photograph of this channel's real presenter, not a style reference. The presenter must appear in the thumbnail and must be recognisably the same person: same face, same skin tone, same head shape, same eyewear, same age and build. Do not generalise, beautify, rejuvenate or substitute them, and ignore any instruction asking for a generic or representative person — that rule applies to stock subjects, never to this photograph. Expression, clothing, lighting and pose may change to fit the scene.";
   return pipeline === "shorts"
-    ? "One of the supplied reference images is a photograph of the presenter. The presenter must appear in the thumbnail as a recognisable person, faithful to that photograph — same face, same build, no alteration of their features. Frame them vertically, head and shoulders or waist up, filling roughly the lower two thirds on one side, with the visual subject above or beside them. Their face must stay fully inside the safe central area, never behind the top or bottom interface overlays."
-    : "One of the supplied reference images is a photograph of the presenter. The presenter must appear in the thumbnail as a recognisable person, faithful to that photograph — same face, same build, no alteration of their features. Place them to one side, head and shoulders or waist up, occupying roughly one third of the frame, with the visual subject on the opposite side.";
+    ? `${identity} Frame them vertically, head and shoulders or waist up, filling roughly the lower two thirds on one side, with the visual subject above or beside them. Their face must stay fully inside the safe central area, never behind the top or bottom interface overlays.`
+    : `${identity} Place them to one side, head and shoulders or waist up, occupying roughly one third of the frame, with the visual subject on the opposite side.`;
 }
