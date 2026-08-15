@@ -1,5 +1,6 @@
 import { requireApiKey } from "../../server/secrets";
 import { openRouterHeaders } from "../../server/http";
+import { openRouterUsage, projectRef, recordUsage } from "../../server/usage";
 
 type HookTarget = "hook" | "promise" | "both";
 
@@ -78,7 +79,7 @@ export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
   const guard = await requireApiKey("openrouter");
   if (guard instanceof Response) return guard;
-  const { apiKey } = guard;
+  const { apiKey, userId } = guard;
   const model = body.model?.trim();
   const subject = body.subject?.trim() ?? "";
   const action = body.action === "iterate" ? "iterate" : "generate";
@@ -177,6 +178,8 @@ USER DIRECTION: ${direction || "None"}`;
       hookValid: action === "iterate" && target === "promise" ? true : hookWords >= 25 && hookWords <= 40,
       promiseValid: action === "iterate" && target === "hook" ? true : promiseWords >= 15 && promiseWords <= 45,
     };
+    const reference = projectRef(body as Record<string, unknown>);
+    await recordUsage({ userId, ...reference, pipeline: "script", action: "hook", provider: "openrouter", usage: openRouterUsage(completion.upstream, model) });
     return Response.json({ result: { hook: parsed.hook.trim(), promise: parsed.promise.trim() }, warning, usage: completion.upstream.usage ?? null });
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");

@@ -2,6 +2,7 @@ import { requireApiKey } from "../../server/secrets";
 import { fetchUpstream, isTimeout } from "../../server/http";
 import { framingFor, presenterBrief, type Pipeline } from "../../server/image-framing";
 import { allowHeadlineText, headlineDirective } from "../../server/headline";
+import { openAiImageUsage, projectRef, recordUsage } from "../../server/usage";
 
 type ImageRequest = {
   pipeline?: Pipeline;
@@ -110,10 +111,11 @@ export async function POST(request: Request) {
         timeoutMs: 180_000,
       });
     }
-    const upstream = await response.json() as { data?: Array<{ b64_json?: string; revised_prompt?: string }>; error?: { message?: string } };
+    const upstream = await response.json() as { data?: Array<{ b64_json?: string; revised_prompt?: string }>; error?: { message?: string }; usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { text_tokens?: number; image_tokens?: number; cached_tokens?: number } } };
     if (!response.ok) return Response.json({ error: "openai_image_failed", detail: upstream.error?.message ?? "Image generation failed" }, { status: response.status === 401 ? 401 : 502 });
     const encoded = upstream.data?.[0]?.b64_json;
     if (!encoded) return Response.json({ error: "openai_image_missing" }, { status: 502 });
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: pipeline === "shorts" ? "shorts" : "script", action: "thumbnail", provider: "openai", usage: openAiImageUsage(upstream.usage, model), images: 1 });
     return Response.json({ image: `data:${framing.mime};base64,${encoded}`, format: framing.extension, size, revisedPrompt: upstream.data?.[0]?.revised_prompt ?? null });
   } catch (error) {
     if (isTimeout(error)) return Response.json({ error: "openai_image_timeout" }, { status: 504 });

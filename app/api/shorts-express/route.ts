@@ -1,6 +1,7 @@
 import { requireApiKey } from "../../server/secrets";
 import { fetchUpstream, isTimeout, openRouterHeaders } from "../../server/http";
 import { cachedUsage, makeCacheKey, readAiCache, writeAiCache, type AiUsage } from "../../server/ai-cache";
+import { projectRef, recordUsage } from "../../server/usage";
 
 const DEFAULT_MODEL = "openai/gpt-5.4-mini";
 const MAX_TITLE = 220;
@@ -77,7 +78,10 @@ export async function POST(request: Request) {
 
   const cacheKey = await makeCacheKey("shorts-express-v1", userId, { originalTitle, model, language, profile });
   const cached = await readAiCache<{ package: ExpressPackage }>(cacheKey);
-  if (cached?.package && validPackage(cached.package)) return Response.json({ package: cached.package, usage: cachedUsage(model) });
+  if (cached?.package && validPackage(cached.package)) {
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "shorts-express", action: "shorts-packaging", provider: "openrouter", usage: { ...cachedUsage(model), cost: 0, cacheHit: true } });
+    return Response.json({ package: cached.package, usage: cachedUsage(model) });
+  }
 
   // Unlike the studio pipeline there is no transcript here, so the channel profile is
   // the only grounding available — without it the copy reads like anyone's channel.
@@ -115,7 +119,9 @@ Rules: write viewer-facing copy in ${language}; produce exactly 3 alternative ti
       description: footer && !parsed.description.includes(footer) ? `${parsed.description.trim()}\n\n${footer}` : parsed.description.trim(),
     };
     await writeAiCache(cacheKey, userId, "shorts-express", { package: result });
-    return Response.json({ package: result, usage: readUsage(upstream, model) });
+    const total = readUsage(upstream, model);
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "shorts-express", action: "shorts-packaging", provider: "openrouter", usage: total });
+    return Response.json({ package: result, usage: total });
   } catch (error) {
     if (isTimeout(error)) return Response.json({ error: "openrouter_timeout", detail: "Le packaging a dépassé le délai autorisé. Réessayez." }, { status: 504 });
     return Response.json({ error: "express_failed", detail: error instanceof Error ? error.message : "Le packaging n’est pas disponible." }, { status: 502 });

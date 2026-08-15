@@ -59,7 +59,7 @@ export function ShortsExpress({ lang, openrouterReady, openaiReady, writerModel,
   };
 
   const requestPackage = async (originalTitle: string) => {
-    const response = await postJson("/api/shorts-express", { originalTitle, model: writerModel || undefined, language: lang, profile });
+    const response = await postJson("/api/shorts-express", { projectTitle: originalTitle, originalTitle, model: writerModel || undefined, language: lang, profile });
     const data = await response.json() as { package?: ExpressPackage; detail?: string; error?: string };
     if (!response.ok || !data.package) throw new Error(data.detail || data.error || "express_failed");
     return data.package;

@@ -5,10 +5,11 @@ import { TAG_LIMIT, joinTags, mergeTags, parseTagList } from "./lib/tags";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ShortsStudio } from "./shorts-studio";
+import { CreditsUsage } from "./credits-usage";
 import { ShortsExpress } from "./shorts-express";
 
 type Lang = "fr" | "en";
-type View = "studio" | "shorts" | "express" | "shorts-express" | "projects" | "profile";
+type View = "studio" | "shorts" | "express" | "shorts-express" | "projects" | "usage" | "profile";
 type StepState = "done" | "active" | "todo";
 type HookIterationTarget = "hook" | "promise" | "both";
 type NoticeKind = "warning" | "error";
@@ -121,11 +122,11 @@ const demoProjects: Project[] = [
 
 const labels = {
   fr: {
-    projects: "Projets", navProjects: "Mes projets", studio: "Script Studio", shorts: "Shorts Studio", soon: "bientôt", express: "Package vidéo", shortsExpress: "Package Short", profile: "Ma chaîne & réglages", hintStudio: "Écrire une vidéo longue", hintShorts: "Découper une vidéo en Shorts", hintExpress: "Vidéo longue déjà tournée", hintShortsExpress: "Short déjà monté", newVideo: "Nouvelle vidéo", pilot: "Pilote automatique", saved: "Sauvegardé à l’instant", steps: ["Recherche & angle", "Hook & intro", "Validation des chapitres", "Corps du script", "Conclusion & CTA", "Relecture finale", "Packaging"],
+    projects: "Projets", navProjects: "Mes projets", studio: "Script Studio", shorts: "Shorts Studio", soon: "bientôt", express: "Package vidéo", shortsExpress: "Package Short", usage: "Credits Usage", hintUsage: "Coûts par projet", profile: "Ma chaîne & réglages", hintStudio: "Écrire une vidéo longue", hintShorts: "Découper une vidéo en Shorts", hintExpress: "Vidéo longue déjà tournée", hintShortsExpress: "Short déjà monté", newVideo: "Nouvelle vidéo", pilot: "Pilote automatique", saved: "Sauvegardé à l’instant", steps: ["Recherche & angle", "Hook & intro", "Validation des chapitres", "Corps du script", "Conclusion & CTA", "Relecture finale", "Packaging"],
     validate: "Valider l’étape", regenerate: "Régénérer", edit: "Modifier", copy: "Copier", words: "mots", seconds: "secondes", guard: "Garde-fous actifs", facts: "Aucune donnée inventée", fixed: "Textes fixes protégés", oral: "Écriture orale", sources: "Sources vérifiées uniquement", project: "Projet", script: "Prompteur", export: "Exporter", allProjects: "Tous les projets", continue: "Continuer", recent: "Projets récents", channelProfile: "Ma chaîne & réglages", integrations: "Intégrations personnelles", connected: "Connecté", disconnected: "Non connecté", test: "Tester la connexion", disconnect: "Déconnecter", saveProfile: "Enregistrer le profil", primaryLang: "Langue principale", secondaryLang: "Langue secondaire", fixedText: "Textes fixes — protégés mot pour mot", audience: "Audience cible", tone: "Ton & style", duration: "Durée cible", close: "Fermer", download: "Télécharger le document", copyScript: "Copier le script", fullScreen: "Plein écran", back: "Retour au studio", status: "Statut", updated: "Dernière modification", noKey: "Recherche manuelle disponible", ready: "Prêt à tourner", mandatoryStop: "Arrêt obligatoire", answerToContinue: "Votre réponse est requise pour continuer.", launch: "Lancer la génération", overview: "Vue d’ensemble", addSubject: "Quel est le sujet exact de la vidéo ?", create: "Créer le projet", cancel: "Annuler"
   },
   en: {
-    projects: "Projects", navProjects: "My projects", studio: "Script Studio", shorts: "Shorts Studio", soon: "soon", express: "Video package", shortsExpress: "Short package", profile: "My channel & settings", hintStudio: "Write a long video", hintShorts: "Cut a video into Shorts", hintExpress: "Long video already recorded", hintShortsExpress: "Short already edited", newVideo: "New video", pilot: "Autopilot", saved: "Saved just now", steps: ["Research & angle", "Hook & intro", "Chapter validation", "Script body", "Conclusion & CTA", "Final review", "Packaging"],
+    projects: "Projects", navProjects: "My projects", studio: "Script Studio", shorts: "Shorts Studio", soon: "soon", express: "Video package", shortsExpress: "Short package", usage: "Credits Usage", hintUsage: "Cost per project", profile: "My channel & settings", hintStudio: "Write a long video", hintShorts: "Cut a video into Shorts", hintExpress: "Long video already recorded", hintShortsExpress: "Short already edited", newVideo: "New video", pilot: "Autopilot", saved: "Saved just now", steps: ["Research & angle", "Hook & intro", "Chapter validation", "Script body", "Conclusion & CTA", "Final review", "Packaging"],
     validate: "Approve step", regenerate: "Regenerate", edit: "Edit", copy: "Copy", words: "words", seconds: "seconds", guard: "Guardrails active", facts: "No invented data", fixed: "Fixed copy protected", oral: "Written for speech", sources: "Verified sources only", project: "Project", script: "Teleprompter", export: "Export", allProjects: "All projects", continue: "Continue", recent: "Recent projects", channelProfile: "My channel & settings", integrations: "Personal integrations", connected: "Connected", disconnected: "Not connected", test: "Test connection", disconnect: "Disconnect", saveProfile: "Save profile", primaryLang: "Primary language", secondaryLang: "Secondary language", fixedText: "Fixed copy — protected word for word", audience: "Target audience", tone: "Tone & style", duration: "Target duration", close: "Close", download: "Download document", copyScript: "Copy script", fullScreen: "Full screen", back: "Back to studio", status: "Status", updated: "Last updated", noKey: "Manual research available", ready: "Ready to record", mandatoryStop: "Mandatory stop", answerToContinue: "Your answer is required to continue.", launch: "Start generation", overview: "Overview", addSubject: "What is the exact video topic?", create: "Create project", cancel: "Cancel"
   },
 };
@@ -543,6 +544,7 @@ export default function ScriptStudio() {
     setStudioAiNotice(null);
     try {
       const response = await postJsonWithRetry("/api/studio-hook", {
+        projectId: project.id, projectTitle: project.title,
         model: aiSettings.openrouterModel,
         language: lang,
         action,
@@ -609,6 +611,7 @@ export default function ScriptStudio() {
     setStudioAiLoading(true); setStudioAiNotice(null);
     try {
       const response = await postJsonWithRetry("/api/studio-chapters", {
+        projectId: project.id, projectTitle: project.title,
         model: aiSettings.writerModel, language: lang, subject: project.subject,
         duration: profile.duration, targetBodyWords: plan.targetBodyWords, chapterCount: plan.chapterCount,
         hook: project.hook, promise: project.promise,
@@ -638,6 +641,7 @@ export default function ScriptStudio() {
     try {
       if (action === "body") return await runBodySections(plan);
       const response = await postJsonWithRetry("/api/studio-write", {
+        projectId: project.id, projectTitle: project.title,
         model: aiSettings.writerModel, language: lang, action: "conclusion",
         subject: project.subject, duration: profile.duration, targetBodyWords: project.bodyWordTarget || plan.targetBodyWords,
         hook: project.hook, promise: project.promise, body: project.body, chapters: project.chapters,
@@ -693,6 +697,7 @@ export default function ScriptStudio() {
       let response: Response;
       try {
         response = await postJsonWithRetry("/api/studio-write", {
+          projectId: project.id, projectTitle: project.title,
           model: aiSettings.writerModel, language: lang, action: "section",
           subject: project.subject, duration: profile.duration, targetBodyWords,
           hook: project.hook, promise: project.promise, chapters, sectionIndex: index,
@@ -829,6 +834,7 @@ export default function ScriptStudio() {
           <NavButton active={view === "express"} icon="🎬" label={t.express} hint={t.hintExpress} onClick={() => setView("express")} />
           <NavButton active={view === "shorts-express"} icon="⚡" label={t.shortsExpress} hint={t.hintShortsExpress} onClick={() => setView("shorts-express")} />
           <NavButton active={view === "projects"} icon="▤" label={t.navProjects} count={projects.length} onClick={() => setView("projects")} />
+          <NavButton active={view === "usage"} icon="◷" label={t.usage} hint={t.hintUsage} onClick={() => setView("usage")} />
           <NavButton active={view === "profile"} icon="◉" label={t.profile} onClick={() => setView("profile")} />
         </nav>
         <div className="sidebar-bottom">
@@ -866,7 +872,8 @@ export default function ScriptStudio() {
         {view === "shorts" && <ShortsStudio lang={lang} openrouterReady={integrations.openrouter.configured} openaiReady={integrations.openai.configured} writerModel={aiSettings.writerModel} imageModel={aiSettings.imageModel} imageQuality={aiSettings.imageQuality} channel={profile.channel} thumbnailSystemPrompt={profile.thumbnailSystemPrompt ?? ""} referenceKeys={referenceThumbnails.map(reference => reference.key)} presenterKey={presenterPhoto?.key ?? ""} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
         {view === "shorts-express" && <ShortsExpress lang={lang} openrouterReady={integrations.openrouter.configured} openaiReady={integrations.openai.configured} writerModel={aiSettings.writerModel} imageModel={aiSettings.imageModel} imageQuality={aiSettings.imageQuality} channel={profile.channel} thumbnailSystemPrompt={profile.thumbnailSystemPrompt ?? ""} referenceKeys={referenceThumbnails.map(reference => reference.key)} presenterKey={presenterPhoto?.key ?? ""} profile={{ channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, descriptionFooter: profile.descriptionFooter }} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
-        {view === "express" && <ExpressPackagingAI value={express} setValue={editExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterPhoto?.key ?? ""} openAiSettings={() => setView("profile")} />}
+        {view === "express" && <ExpressPackagingAI value={express} setValue={editExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterPhoto?.key ?? ""} openAiSettings={() => setView("profile")} projectRef={{ projectId: "", projectTitle: lang === "fr" ? "Package vidéo (hors projet)" : "Video package (standalone)" }} />}
+        {view === "usage" && <CreditsUsage lang={lang} showToast={showToast} />}
         {view === "profile" && <ProfilePageAI profile={profile} setProfile={editProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} youtube={youtube} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} presenterPhoto={presenterPhoto} reloadPresenter={loadPresenterPhoto} brandLogo={brandLogo} reloadLogo={loadBrandLogo} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
       </main>
       {newOpen && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title"><button className="modal-close" onClick={() => setNewOpen(false)}>×</button><span className="eyebrow">{lang === "fr" ? "NOUVEAU PROJET" : "NEW PROJECT"}</span><h2 id="new-project-title">{t.addSubject}</h2><p>{lang === "fr" ? "Soyez précis : le studio ne recherchera jamais une catégorie plus large." : "Be specific: the studio will never research a broader category."}</p><textarea value={newSubject} maxLength={2000} onChange={e => setNewSubject(e.target.value)} placeholder={lang === "fr" ? "Ex. Comment utiliser l’IA pour répondre aux clients sur WhatsApp Business" : "E.g. How to use AI to answer customers on WhatsApp Business"} /><div className="modal-actions"><button className="ghost" onClick={() => setNewOpen(false)}>{t.cancel}</button><button className="primary" onClick={createProject}>{t.create} →</button></div></div></div>}
@@ -940,9 +947,10 @@ function quizClipboard(item: PackagingResult["quiz"][number], lang: Lang) {
   return `${item.question}\n${choices.map((choice, index) => `${letters[index]}. ${choice}`).join("\n")}\n${lang === "fr" ? "Bonne réponse" : "Correct answer"}: ${letters[item.correctOption ?? 0]}`;
 }
 
-function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, integrations, referenceThumbnails, presenterKey, openAiSettings, autoStart, embedded }: {
+function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, aiSettings, integrations, referenceThumbnails, presenterKey, openAiSettings, projectRef, autoStart, embedded }: {
   value: ExpressState; setValue: (value: ExpressState) => void; profile: Profile; lang: Lang;
   copy: (value: string) => void; showToast: (message: string, kind?: AlertKind) => void; aiSettings: AiSettings; integrations: Integrations; referenceThumbnails: ReferenceThumbnail[]; presenterKey: string; openAiSettings: () => void;
+  projectRef: { projectId: string; projectTitle: string };
   autoStart?: boolean; embedded?: boolean;
 }) {
   const [loading, setLoading] = useState<"package" | "images" | null>(null);
@@ -970,6 +978,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     setPromptLoading(true);
     try {
       const response = await postJsonWithRetry("/api/concept-prompt", {
+        ...projectRef,
         model: aiSettings.openrouterModel, language: lang,
         topic: value.package?.topic ?? value.subject, title: option.title, overlay: option.overlay,
         conceptName: option.concepts[promptEditor.index]?.name ?? "", currentPrompt: promptEditor.draft, direction: promptEditor.direction,
@@ -1005,6 +1014,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     setLoading("package");
     try {
       const response = await postJsonWithRetry("/api/openrouter-generate", {
+        ...projectRef, pipeline: embedded ? "script" : "express",
         model: steering && aiSettings.writerModel ? aiSettings.writerModel : aiSettings.openrouterModel,
         thinking: Boolean(steering && aiSettings.writerModel),
         direction: steering,
@@ -1057,7 +1067,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
         const concept = option.concepts[conceptIndex];
         const response = await fetch("/api/openai-image", {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ model: aiSettings.imageModel, quality: aiSettings.imageQuality, prompt: concept.prompt, overlay: option.overlay, channel: profile.channel, systemPrompt: profile.thumbnailSystemPrompt, referenceKeys: referenceThumbnails.map(reference => reference.key), presenterKey, pipeline: "script" }),
+          body: JSON.stringify({ ...projectRef, model: aiSettings.imageModel, quality: aiSettings.imageQuality, prompt: concept.prompt, overlay: option.overlay, channel: profile.channel, systemPrompt: profile.thumbnailSystemPrompt, referenceKeys: referenceThumbnails.map(reference => reference.key), presenterKey, pipeline: "script" }),
         });
         const data = await response.json() as { image?: string; error?: string; detail?: string };
         if (!response.ok || !data.image) throw new Error(data.detail || data.error || `image_${option.id}_failed`);
@@ -1201,7 +1211,7 @@ function StudioPackaging({ project, profile, updateProject, lang, t, copy, showT
           <Question n="3" label={lang === "fr" ? "Concept visuel retenu" : "Chosen visual concept"} optional={lang === "fr" ? "optionnel" : "optional"} help={lang === "fr" ? "Laissez vide pour choisir parmi les concepts proposés par l’IA" : "Leave empty to choose from the concepts proposed by AI"} value={a.visual} set={v => setAnswer("visual", v)} placeholder={lang === "fr" ? "Ex. visage surpris à gauche, téléphone à droite" : "E.g. surprised face left, phone right"} />
         </div></>
       : <><div className="ab-note">ⓘ {lang === "fr" ? "YouTube ne teste qu’une variable à la fois : titres OU miniatures." : "YouTube tests one variable at a time: titles OR thumbnails."}</div>
-        <ExpressPackagingAI value={packagingValue} setValue={setPackagingValue} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterKey} openAiSettings={openAiSettings} autoStart={complete} embedded />
+        <ExpressPackagingAI value={packagingValue} setValue={setPackagingValue} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterKey} openAiSettings={openAiSettings} projectRef={{ projectId: project.id, projectTitle: project.title }} autoStart={complete} embedded />
         <div className="publish-section"><h3>{lang === "fr" ? "Checklist de publication" : "Publishing checklist"}</h3>{["Titre", "Description & liens", "Miniature à 120 px", "Chapitres", "Sous-titres", "Commentaire épinglé", "Test A/B", "CTR à 24–48 h"].map(x => <label key={x}><input type="checkbox" />{x}</label>)}</div></>}
   </>;
 }

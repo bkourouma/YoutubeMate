@@ -133,7 +133,7 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
     if (transcript.trim().length < 80) return showToast(lang === "fr" ? "Ajoutez une transcription plus complète (80 caractères minimum)." : "Add a fuller transcript (80 characters minimum).", "warning");
     setLoading("analyze");
     try {
-      const response = await postJson("/api/shorts-analyze", { transcript, numberOfVideos: videoCount, durationMinutes: duration, model: writerModel || undefined });
+      const response = await postJson("/api/shorts-analyze", { projectId: activeProjectId, projectTitle: projectName(), transcript, numberOfVideos: videoCount, durationMinutes: duration, model: writerModel || undefined });
       const data = await response.json() as { shorts?: Array<Partial<ShortItem> & { durationMinutes?: number }>; usage?: ShortsUsage; detail?: string; error?: string };
       if (!response.ok || !data.shorts?.length) throw new Error(data.detail || data.error || "analysis_failed");
       const normalized: ShortItem[] = data.shorts.map((item, index) => {
@@ -164,7 +164,7 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
     if (loading || !requireKey() || !shorts.length) return;
     setLoading("titles");
     try {
-      const response = await postJson("/api/shorts-titles", { shorts: shorts.map((short, index) => ({ index, text: short.text })), model: writerModel || undefined });
+      const response = await postJson("/api/shorts-titles", { projectId: activeProjectId, projectTitle: projectName(), shorts: shorts.map((short, index) => ({ index, text: short.text })), model: writerModel || undefined });
       const data = await response.json() as { results?: Array<{ index: number; titles: ShortsTitleOption[] }>; usage?: ShortsUsage; detail?: string; error?: string };
       if (!response.ok || !data.results?.length) throw new Error(data.detail || data.error || "titles_failed");
       const options: Record<number, ShortsTitleOption[]> = {};
@@ -190,7 +190,7 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
     setLoading("metadata");
     try {
       const items = shorts.map((short, index) => ({ index, title: selectedTitles[index] || short.title, text: short.text }));
-      const response = await postJson("/api/shorts-metadata", { items, model: writerModel || undefined });
+      const response = await postJson("/api/shorts-metadata", { projectId: activeProjectId, projectTitle: projectName(), items, model: writerModel || undefined });
       const data = await response.json() as { results?: Array<{ index: number } & ShortsMetadataItem>; usage?: ShortsUsage; detail?: string; error?: string };
       if (!response.ok || !data.results?.length) throw new Error(data.detail || data.error || "metadata_failed");
       const next: Record<number, ShortsMetadataItem> = {};
@@ -249,6 +249,7 @@ export function ShortsStudio({ lang, openrouterReady, openaiReady, writerModel, 
     setThumbnailLoading(index);
     try {
       const response = await postJson("/api/openai-image", {
+        projectId: activeProjectId, projectTitle: projectName(),
         pipeline: "shorts", model: imageModel, quality: imageQuality,
         prompt: concept.prompt, overlay: concept.overlayText, channel,
         systemPrompt: thumbnailSystemPrompt, referenceKeys, presenterKey,

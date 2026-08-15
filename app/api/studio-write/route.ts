@@ -1,5 +1,6 @@
 import { requireApiKey } from "../../server/secrets";
 import { openRouterHeaders } from "../../server/http";
+import { openRouterUsage, projectRef, recordUsage } from "../../server/usage";
 
 type Chapter = {
   id: string;
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
   const body = rawBody as RequestBody;
   const guard = await requireApiKey("openrouter");
   if (guard instanceof Response) return guard;
-  const { apiKey } = guard;
+  const { apiKey, userId } = guard;
   const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
   const subject = typeof body.subject === "string" ? body.subject.trim() : "";
   const action = body.action === "conclusion" || body.action === "section" ? body.action : null;
@@ -154,6 +155,7 @@ export async function POST(request: Request) {
       }
       if (!conclusion) return Response.json({ error: "openrouter_invalid_conclusion", detail: "Le modèle n’a pas produit de conclusion exploitable." }, { status: 502 });
       const conclusionWords = countWords(conclusion);
+      await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "script", action: "conclusion", provider: "openrouter", usage: openRouterUsage(completion.upstream, model) });
       return Response.json({ result: { conclusion, wordCount: conclusionWords }, warning: conclusionWords < 90 || conclusionWords > 160 ? { code: "conclusion_length_adjustment", wordCount: conclusionWords } : null, model, reasoningEffort: "high", usage: completion.upstream.usage ?? null });
     }
 
@@ -201,6 +203,7 @@ export async function POST(request: Request) {
     if (!section || section.script.length < 80) return Response.json({ error: "openrouter_invalid_section", detail: language === "English" ? "The model did not write this chapter." : "Le modèle n’a pas rédigé ce chapitre." }, { status: 502 });
     const sectionWords = countWords(section.script);
     const warning = sectionWords < targetMinimum ? { code: "section_under_target", actualWords: sectionWords, targetMinimum } : null;
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "script", action: "chapter", provider: "openrouter", usage: openRouterUsage(completion.upstream, model) });
     return Response.json({ result: { section: { id: chapter.id, script: section.script, transition: section.transition }, wordCount: sectionWords, index: sectionIndex, targetWords: chapter.targetWords }, warning, model, reasoningEffort: "high", usage: completion.upstream.usage ?? null });
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");

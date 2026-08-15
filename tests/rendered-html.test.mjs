@@ -1008,3 +1008,96 @@ test("appends the channel's default tags and trims from the end to fit YouTube's
   assert.match(studio, /Tags par défaut de la chaîne/);
   assert.match(studio, /defaultTagBudget/);
 });
+
+test("prices every paid call from the provider's own figures", async () => {
+  const { openRouterUsage, openAiImageUsage } = await import("../app/server/pricing.ts");
+  // OpenRouter returns the amount it charged on every response, with no request
+  // parameter — so the ledger takes its figure rather than a rate table that can go stale.
+  const router = openRouterUsage({
+    usage: { cost: 0.0412, prompt_tokens: 8_000, completion_tokens: 2_400,
+      prompt_tokens_details: { cached_tokens: 1_500 }, completion_tokens_details: { reasoning_tokens: 900 } },
+  }, "openai/gpt-5.6-sol");
+  assert.equal(router.cost, 0.0412);
+  assert.equal(router.cachedTokens, 1_500);
+  assert.equal(router.reasoningTokens, 900);
+  // A response without usage must price at zero, never NaN — a NaN would poison every
+  // SUM in the ledger from that row onwards.
+  const empty = openRouterUsage({}, "m");
+  assert.equal(empty.cost, 0);
+  assert.ok(Number.isFinite(openRouterUsage({ usage: { cost: "oops" } }, "m").cost));
+
+  // The images endpoint bills tokens and returns no cost, so this one is computed:
+  // $5/M text in, $8/M image in, $2/M cached, $30/M out for gpt-image-2.
+  const image = openAiImageUsage({
+    input_tokens: 3_000, output_tokens: 1_600,
+    input_tokens_details: { text_tokens: 1_000, image_tokens: 2_000, cached_tokens: 500 },
+  }, "gpt-image-2");
+  // 1000 text + 2000 image = the 3000 input tokens, of which 500 are cached and billed
+  // at the cache rate, leaving 1500 image tokens at the full one.
+  const expected = (1_000 * 5 + 1_500 * 8 + 500 * 2 + 1_600 * 30) / 1_000_000;
+  assert.ok(Math.abs(image.cost - expected) < 1e-9, `${image.cost} != ${expected}`);
+  // gpt-image-1.5 costs more on output, so the same tokens must not price the same.
+  assert.ok(openAiImageUsage({ input_tokens: 0, output_tokens: 1_000 }, "gpt-image-1.5").cost
+    > openAiImageUsage({ input_tokens: 0, output_tokens: 1_000 }, "gpt-image-2").cost);
+  // An undocumented split is billed at the cheapest rate: an unknown must not inflate
+  // the figure the user is shown.
+  assert.equal(openAiImageUsage({ input_tokens: 1_000, output_tokens: 0 }, "gpt-image-2").cost, 1_000 * 5 / 1_000_000);
+
+  const { formatCost, formatTokens } = await import("../app/lib/money.ts");
+  // A single call costs fractions of a cent; two decimals would print $0.00 against
+  // real spending.
+  assert.equal(formatCost(0.00042), "$0.0004");
+  assert.equal(formatCost(0.043), "$0.043");
+  assert.equal(formatCost(12.5), "$12.50");
+  assert.equal(formatCost(0), "$0");
+  assert.equal(formatTokens(1_500), "1.5k");
+  assert.equal(formatTokens(2_400_000), "2.4M");
+});
+
+test("keeps the credits ledger per user and per project", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("usage-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const asUser = (user) => ({ "content-type": "application/json", "oai-authenticated-user-id": user });
+
+  const ledger = async (user) => {
+    const response = await worker.fetch(new Request("http://localhost/api/usage", { headers: asUser(user) }), env, ctx);
+    return { status: response.status, body: await response.json() };
+  };
+  const mine = await ledger(TEST_USER);
+  // Without D1 wired in this harness the route answers 503 rather than throwing; either
+  // way it must never answer with another account's figures.
+  assert.ok([200, 503].includes(mine.status), `unexpected status ${mine.status}`);
+  if (mine.status === 200) {
+    for (const key of ["total", "byProject", "byProjectAction", "byModel", "recent"]) {
+      assert.ok(key in mine.body, `the ledger is missing ${key}`);
+    }
+  }
+  // Anonymous callers get nothing: spending is per identity.
+  const anonymous = await worker.fetch(new Request("http://localhost/api/usage"), env, ctx);
+  assert.equal(anonymous.status, 401);
+  const anonymousDelete = await worker.fetch(new Request("http://localhost/api/usage", { method: "DELETE" }), env, ctx);
+  assert.equal(anonymousDelete.status, 401);
+
+  const [usage, schema, studio, imageRoute, packagingRoute] = await Promise.all([
+    readFile(new URL("../app/server/usage.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/openai-image/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
+  ]);
+  // Accounting must never sink a generation that already succeeded and was already paid.
+  assert.match(usage, /export async function recordUsage[\s\S]*?try \{[\s\S]*?\} catch \{/);
+  // The title is copied into the row: renaming or deleting a project must not rewrite
+  // what it already cost.
+  assert.match(schema, /projectTitle: text\("project_title"\)/);
+  // Every paid route records, and the client names the project it is spending on.
+  for (const [name, route] of [["images", imageRoute], ["packaging", packagingRoute]]) {
+    assert.match(route, /await recordUsage\(/, `${name} does not record its spending`);
+  }
+  assert.match(studio, /projectId: project\.id, projectTitle: project\.title/);
+  assert.match(studio, /view === "usage" && <CreditsUsage/);
+  assert.match(studio, /usage: "Credits Usage"/);
+});

@@ -1,5 +1,7 @@
 import { requireApiKey } from "../../server/secrets";
 import { openRouterHeaders } from "../../server/http";
+import { openRouterUsage, projectRef, recordUsage } from "../../server/usage";
+
 
 type RequestBody = {
   model?: string;
@@ -31,7 +33,7 @@ export async function POST(request: Request) {
   const body = rawBody as RequestBody;
   const guard = await requireApiKey("openrouter");
   if (guard instanceof Response) return guard;
-  const { apiKey } = guard;
+  const { apiKey, userId } = guard;
   const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
   const safe = (value: unknown, maximum: number) => typeof value === "string" ? value.trim().slice(0, maximum) : "";
   const title = safe(body.title, 300);
@@ -63,6 +65,7 @@ export async function POST(request: Request) {
     const content = upstream.choices?.[0]?.message?.content;
     const prompt = content ? parseJsonContent(content).prompt : "";
     if (typeof prompt !== "string" || prompt.trim().length < 30) return Response.json({ error: "openrouter_invalid_prompt", detail: language === "English" ? "The model did not return a usable prompt." : "Le modèle n’a pas renvoyé de prompt exploitable." }, { status: 502 });
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "script", action: "thumbnail-prompt", provider: "openrouter", usage: openRouterUsage(upstream, model) });
     return Response.json({ prompt: prompt.trim(), usage: upstream.usage ?? null });
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");

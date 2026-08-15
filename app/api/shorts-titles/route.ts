@@ -1,6 +1,7 @@
 import { requireApiKey } from "../../server/secrets";
 import { fetchUpstream, isTimeout, openRouterHeaders } from "../../server/http";
 import { cachedUsage, makeCacheKey, readAiCache, writeAiCache, type AiUsage } from "../../server/ai-cache";
+import { projectRef, recordUsage, type TokenUsage } from "../../server/usage";
 
 const DEFAULT_MODEL = "openai/gpt-5.4-mini";
 const BATCH_SIZE = 8;
@@ -99,14 +100,19 @@ export async function POST(request: Request) {
 
   const cacheKey = await makeCacheKey("shorts-titles-v1", userId, { shorts, model });
   const cached = await readAiCache<{ results: TitleResult[] }>(cacheKey);
-  if (cached?.results?.length === shorts.length) return Response.json({ results: cached.results, usage: cachedUsage(model) });
+  if (cached?.results?.length === shorts.length) {
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "shorts", action: "shorts-titles", provider: "openrouter", usage: { ...cachedUsage(model) as TokenUsage, cost: 0, cacheHit: true } });
+    return Response.json({ results: cached.results, usage: cachedUsage(model) });
+  }
 
   const batches = Array.from({ length: Math.ceil(shorts.length / BATCH_SIZE) }, (_, index) => shorts.slice(index * BATCH_SIZE, (index + 1) * BATCH_SIZE));
   try {
     const batchResults = await Promise.all(batches.map(batch => createTitles(apiKey, model, batch)));
     const results = batchResults.flatMap(batch => batch.results).sort((a, b) => a.index - b.index);
     await writeAiCache(cacheKey, userId, "titles", { results });
-    return Response.json({ results, usage: aggregateUsage(batchResults.map(batch => batch.usage), model) });
+    const total = aggregateUsage(batchResults.map(batch => batch.usage), model);
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "shorts", action: "shorts-titles", provider: "openrouter", usage: total });
+    return Response.json({ results, usage: total });
   } catch (error) {
     if (isTimeout(error)) return Response.json({ error: "openrouter_timeout", detail: "La génération des titres a dépassé le délai autorisé. Réessayez." }, { status: 504 });
     return Response.json({ error: "titles_failed", detail: error instanceof Error ? error.message : "Les titres ne sont pas disponibles." }, { status: 502 });

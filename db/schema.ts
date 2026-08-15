@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const workspaces = sqliteTable("workspaces", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -76,3 +76,29 @@ export const shortsProjects = sqliteTable("shorts_projects", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, table => [index("idx_shorts_projects_user_updated").on(table.userId, table.updatedAt)]);
+
+// One row per paid call. Denormalised on purpose: the project title is copied in, so a
+// renamed or deleted project never rewrites — or erases — what it already cost.
+// Costs are stored in USD as returned by the provider, never recomputed at read time:
+// a rate change must not silently rewrite last month's bill.
+export const usageEvents = sqliteTable("usage_events", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  projectId: text("project_id").notNull().default(""),
+  projectTitle: text("project_title").notNull().default(""),
+  pipeline: text("pipeline").notNull(),
+  action: text("action").notNull(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  costUsd: real("cost_usd").notNull().default(0),
+  promptTokens: integer("prompt_tokens").notNull().default(0),
+  completionTokens: integer("completion_tokens").notNull().default(0),
+  reasoningTokens: integer("reasoning_tokens").notNull().default(0),
+  cachedTokens: integer("cached_tokens").notNull().default(0),
+  images: integer("images").notNull().default(0),
+  cacheHit: integer("cache_hit").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+}, table => [
+  index("idx_usage_user_created").on(table.userId, table.createdAt),
+  index("idx_usage_user_project").on(table.userId, table.projectId),
+]);

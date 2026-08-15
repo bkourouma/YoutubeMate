@@ -1,5 +1,7 @@
 import { requireApiKey } from "../../server/secrets";
 import { openRouterHeaders } from "../../server/http";
+import { openRouterUsage, projectRef, recordUsage } from "../../server/usage";
+
 
 type RequestBody = {
   model?: string;
@@ -10,6 +12,9 @@ type RequestBody = {
   direction?: string;
   previousTitles?: string[];
   thinking?: boolean;
+  pipeline?: "script" | "express";
+  projectId?: string;
+  projectTitle?: string;
   profile?: { channel?: string; theme?: string; audience?: string; tone?: string; thumbnailSystemPrompt?: string; descriptionFooter?: string };
 };
 
@@ -22,7 +27,8 @@ export async function POST(request: Request) {
   const body = await request.json() as RequestBody;
   const guard = await requireApiKey("openrouter");
   if (guard instanceof Response) return guard;
-  const { apiKey } = guard;
+  const { apiKey, userId } = guard;
+  const { projectId, projectTitle } = projectRef(body as Record<string, unknown>);
   const source = body.source?.trim() ?? "";
   const model = body.model?.trim();
   if (!model) return Response.json({ error: "ai_configuration_required" }, { status: 400 });
@@ -103,6 +109,7 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
     const footer = body.profile?.descriptionFooter?.trim();
     const generatedDescription = typeof result.improvedDescription === "string" ? result.improvedDescription.trim() : "";
     result.improvedDescription = footer && !generatedDescription.includes(footer) ? `${generatedDescription}\n\n${footer}`.trim() : generatedDescription;
+    await recordUsage({ userId, projectId, projectTitle, pipeline: body.pipeline === "express" ? "express" : "script", action: direction ? "packaging-steered" : "packaging", provider: "openrouter", usage: openRouterUsage(upstream, model) });
     return Response.json({ result, usage: upstream.usage ?? null });
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");

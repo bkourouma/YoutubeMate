@@ -1,6 +1,7 @@
 import { requireApiKey } from "../../server/secrets";
 import { fetchUpstream, isTimeout, openRouterHeaders } from "../../server/http";
 import { cachedUsage, makeCacheKey, readAiCache, writeAiCache } from "../../server/ai-cache";
+import { projectRef, recordUsage, type TokenUsage } from "../../server/usage";
 
 const DEFAULT_MODEL = "openai/gpt-5.4-mini";
 const BATCH_SIZE = 10;
@@ -328,7 +329,10 @@ export async function POST(request: Request) {
 
   const cacheKey = await makeCacheKey("shorts-analyze-v1", userId, { transcript, durationMinutes: fixedDuration ?? "auto", requestedVideos, model });
   const cached = await readAiCache<{ shorts: GeneratedShort[] }>(cacheKey);
-  if (cached?.shorts?.length === requestedVideos) return Response.json({ shorts: cached.shorts, usage: cachedUsage(model) });
+  if (cached?.shorts?.length === requestedVideos) {
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "shorts", action: "shorts-excerpts", provider: "openrouter", usage: { ...cachedUsage(model) as TokenUsage, cost: 0, cacheHit: true } });
+    return Response.json({ shorts: cached.shorts, usage: cachedUsage(model) });
+  }
 
   const durationInstruction = fixedDuration
     ? `Chaque extrait doit viser ${fixedDuration} minute${fixedDuration > 1 ? "s" : ""} (environ ${fixedDuration * 140} à ${fixedDuration * 170} mots). Indique ${fixedDuration} dans durationMinutes.`
@@ -349,6 +353,7 @@ export async function POST(request: Request) {
     const results = await Promise.all(batches.map(({ start, count }) => generatePlainBatch({ apiKey, model, transcript, durationInstruction, requestedVideos, start, count, fixedDuration })));
     const generatedShorts = results.flatMap(result => result.shorts).slice(0, requestedVideos);
     await writeAiCache(cacheKey, userId, "analyze", { shorts: generatedShorts });
+    await recordUsage({ userId, ...projectRef(body as Record<string, unknown>), pipeline: "shorts", action: "shorts-excerpts", provider: "openrouter", usage: addUsage(results.map(result => result.usage), model) });
     return Response.json({ shorts: generatedShorts, usage: addUsage(results.map(result => result.usage), model) });
   } catch (error) {
     if (error instanceof UpstreamError) return Response.json({ error: error.code, detail: error.message }, { status: error.status });
