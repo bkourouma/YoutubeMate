@@ -1423,25 +1423,28 @@ test("holds the Descript contract: one composition per short, source untouched, 
   for (const source of [descript, upload]) assert.doesNotMatch(source, /console\.(log|error|warn)/);
 });
 
-test("states the licence it is actually under", async () => {
-  const [licence, readmeEn, readmeFr, contributing] = await Promise.all([
+test("states the licence it is actually under, and keeps contributing cheap", async () => {
+  const [licence, readmeEn, readmeFr, contributing, template] = await Promise.all([
     readFile(new URL("../LICENSE", import.meta.url), "utf8"),
     readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../README.fr.md", import.meta.url), "utf8"),
     readFile(new URL("../CONTRIBUTING.md", import.meta.url), "utf8"),
+    readFile(new URL("../.github/PULL_REQUEST_TEMPLATE.md", import.meta.url), "utf8"),
   ]);
   // A public repository with no LICENSE grants nobody anything, whatever it looks like.
-  assert.match(licence, /GNU AFFERO GENERAL PUBLIC LICENSE/);
-  assert.match(licence, /Version 3, 19 November 2007/);
-  // The network clause is the whole reason for AGPL over GPL here.
-  assert.match(licence, /interacting with it remotely through a computer network/);
-  assert.ok(licence.split("\n").length > 600, "the licence text looks truncated");
+  assert.match(licence, /^MIT License/);
+  assert.match(licence, /Copyright \(c\) \d{4} \S+/);
+  assert.match(licence, /WITHOUT WARRANTY OF ANY KIND/);
+  assert.doesNotMatch(licence, /AFFERO|GENERAL PUBLIC LICENSE/, "a copyleft licence is still in the file");
   for (const [name, readme] of [["en", readmeEn], ["fr", readmeFr]]) {
-    assert.match(readme, /AGPL-3\.0-or-later/, `README.${name} does not state the licence`);
-    assert.doesNotMatch(readme, /no LICENSE file yet|pas encore de fichier LICENSE/, `README.${name} still says the licence is missing`);
+    assert.match(readme, /MIT/, `README.${name} does not state the licence`);
+    assert.doesNotMatch(readme, /AGPL|no LICENSE file yet|pas encore de fichier LICENSE/, `README.${name} is stale on the licence`);
   }
-  // The contribution agreement is still open, and merging before settling it cannot be
-  // undone — so the file has to say so rather than invite pull requests.
-  assert.match(contributing, /CLA or a DCO/);
-  assert.match(contributing, /no external contribution is being merged until it is settled/);
+  // MIT was chosen to get contributions, so the contributing path must stay one line: a
+  // DCO sign-off, and explicitly no CLA to read.
+  assert.match(contributing, /git commit -s/);
+  assert.match(contributing, /Developer Certificate of\s+Origin/);
+  assert.match(contributing, /no contributor licence agreement to read/i);
+  assert.doesNotMatch(contributing, /no external contribution is being merged/, "contributions are open now");
+  assert.match(template, /git commit -s/);
 });

@@ -12,7 +12,7 @@ One workshop for two YouTube formats, with one database, one profile and one set
 
 > **Formerly YoutubeMate.** Google's branding guidelines forbid "YouTube" in an application's name, so the product is being renamed. The new name is **not legally cleared yet** — see [docs/BRAND_RENAME_CHECKLIST.md](docs/BRAND_RENAME_CHECKLIST.md).
 >
-> **Licensed under [AGPL-3.0-or-later](LICENSE).** You may use, modify and self-host this freely; if you offer a modified version as a network service, your modifications must be published under the same licence. A separate commercial licence is available from the copyright holder — see [docs/LICENSING_DECISION.md](docs/LICENSING_DECISION.md).
+> **[MIT licensed](LICENSE).** Use it, modify it, self-host it, build a product on it — commercially or otherwise. **Contributions are welcome**: see [CONTRIBUTING.md](CONTRIBUTING.md), and [docs/LICENSING_DECISION.md](docs/LICENSING_DECISION.md) for why MIT.
 >
 > **There is no hosted version and no Docker image.** Self-hosting is the only way to run this today, and it is single-tenant — see [docs/HOSTED_READINESS.md](docs/HOSTED_READINESS.md).
 
@@ -52,7 +52,7 @@ Not available. Nothing is running, nothing accepts sign-ups, nothing can be paid
 | [Security](SECURITY.md) | Private reporting, what is protected and what is not |
 | [Hosted readiness](docs/HOSTED_READINESS.md) · [fr](docs/HOSTED_READINESS.fr.md) | What exists, what does not |
 | [Roadmap](docs/HOSTED_ROADMAP.md) | Prioritised backlog with acceptance criteria |
-| [Licensing](docs/LICENSING_DECISION.md) | Why AGPL-3.0, and what it commits the project to |
+| [Licensing](docs/LICENSING_DECISION.md) | Why MIT, and what it costs |
 | [Brand rename](docs/BRAND_RENAME_CHECKLIST.md) | What is done, what only the owner can do |
 | [Decisions](docs/adr/) | Architecture decision records |
 

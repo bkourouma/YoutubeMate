@@ -27,21 +27,17 @@ applied by editing that one module.
 
 ---
 
-## P0-2 — Settle the contribution agreement (CLA or DCO)
+## P0-2 — Licence and contribution model
 
-`priority:P0`
-**Blocks:** merging any external contribution.
+`priority:P0` — **done**, one check remaining.
 
-**Done:** AGPL-3.0-or-later chosen and applied; `LICENSE` holds the full text; both READMEs
-state it.
+MIT, with a DCO sign-off. `LICENSE` holds the full text, both READMEs state it, and
+`CONTRIBUTING.md` explains `git commit -s`. No CLA: MIT already permits commercial use, so
+there is nothing a contributor agreement would preserve, and it is a known reason people
+never open the pull request.
 
-**Still open:** CLA or DCO. A DCO is lighter but forecloses the separate commercial
-licence; a CLA preserves it and deters casual contributors. Neither can be applied
-retroactively — one unreachable past contributor blocks relicensing permanently.
-
-**Done when:** the choice is made and documented in `CONTRIBUTING.md`; the mechanism is
-enforced on pull requests; and dependency licences have been checked for AGPL
-compatibility before the first release.
+**Remaining:** verify dependency licences are MIT-compatible before the first release.
+Nothing in the tree is expected to conflict, but it has not been checked.
 
 ---
 

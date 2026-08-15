@@ -1,15 +1,27 @@
 # Contributing
 
-Thank you for looking. This is a small project with one maintainer, so the most useful
-contribution is usually a precise bug report or a small, verified change.
+**Contributions are wanted here**, and the project is licensed MIT partly to keep the
+barrier low. There is no contributor licence agreement to read, no copyright assignment,
+and no corporate policy to check before you can send a patch.
 
-> **Licensed under AGPL-3.0-or-later.** Contributions are accepted under the same terms.
->
-> **One thing is still open**: whether contributions require a CLA or a DCO sign-off. That
-> choice decides whether a separate commercial licence stays possible, and it cannot be
-> made retroactively — so **no external contribution is being merged until it is settled**.
-> Issues, bug reports and discussion are very welcome in the meantime. See
-> `docs/LICENSING_DECISION.md`.
+One line is required on each commit:
+
+```bash
+git commit -s -m "Your message"
+```
+
+The `-s` adds a `Signed-off-by:` line — the [Developer Certificate of
+Origin](https://developercertificate.org/), a statement that you wrote the change or have
+the right to submit it. Forgot it? `git commit --amend -s` and force-push; nobody will
+hold it against you.
+
+## Good places to start
+
+- The debugging guide's **manual checks** are unverified against real accounts. Running one
+  and reporting what actually happened is genuinely valuable, and needs no code.
+- `docs/HOSTED_ROADMAP.md` is a prioritised backlog with acceptance criteria. P1-8 (one
+  `npm install` on Linux, committed) takes minutes and unblocks `npm ci` in CI.
+- A precise bug report beats a rushed fix. This is a small project with one maintainer.
 
 ## Setting up
 

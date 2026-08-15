@@ -31,6 +31,11 @@
 - [ ] English and French docs updated together, or no user-visible change
 - [ ] Debugging guide updated if a new failure mode became possible
 
+## Sign-off
+
+- [ ] Commits are signed off (`git commit -s`). One line, no agreement to read — see
+      [CONTRIBUTING.md](../CONTRIBUTING.md). Forgot it? `git commit --amend -s` and force-push.
+
 ## Secrets
 
 - [ ] No API key, token, refresh token, OAuth code, encryption key or signed URL in the

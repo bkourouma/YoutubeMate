@@ -15,9 +15,11 @@ The constraints are unusual enough that the popular answer is not the right one:
 
 - **Cloudflare Workers.** Edge runtime, no Node APIs. Anything assuming a Node server or
   long-lived process is out.
-- **The project is AGPL.** Self-hosters are a first-class audience. A provider that
-  requires every self-hoster to create an account with a third-party SaaS, and to pay per
-  monthly active user, makes self-hosting conditional on someone else's business.
+- **Self-hosters are a first-class audience.** This was originally argued from the licence
+  being AGPL; the licence is now MIT, and the conclusion is unchanged — arguably stronger,
+  since MIT is chosen precisely to maximise adoption. A provider that requires every
+  self-hoster to open an account with a third-party SaaS, and to pay per monthly active
+  user, makes running your own copy conditional on someone else's business.
 - **Drizzle over D1 is already here**, with a working migration flow.
 - **Solo maintainer**, and the hosted version has no revenue yet. Per-MAU pricing before
   the first paying user is a bad shape.
@@ -31,10 +33,10 @@ The constraints are unusual enough that the popular answer is not the right one:
 ## Why not the others
 
 **Clerk.** The best developer experience of the group, and genuinely good on Workers. But
-it is proprietary and priced per monthly active user. Every self-hoster of an AGPL project
-would need their own Clerk account and would hit that pricing — which converts an
-open-source project into a funnel for someone else's SaaS. That is the wrong default for
-the audience this licence chooses.
+it is proprietary and priced per monthly active user. Every self-hoster would need their
+own Clerk account and would hit that pricing — which turns an open-source project into a
+funnel for someone else's SaaS. That is the wrong default when the point of the licence is
+to make running your own copy easy.
 
 **Auth0.** Mature and heavyweight. Same objection as Clerk, with worse pricing at scale and
 more configuration than a single-product app needs.
