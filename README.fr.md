@@ -1,8 +1,64 @@
-# YoutubeMate
+# CreatorMate
 
 *[English](README.md) · Français*
 
+[![CI](https://github.com/bkourouma/CreatorMate/actions/workflows/ci.yml/badge.svg)](https://github.com/bkourouma/CreatorMate/actions/workflows/ci.yml)
+
+**Un cockpit de production éditoriale qui agit dans votre chaîne de production.** Il transforme une vidéo longue en Shorts, crée directement les compositions dans Descript, puis prépare et pilote leur publication sur YouTube — avec une validation humaine à chaque étape qui compte.
+
+Il ne se contente pas de recommander, ni de vous remettre des fichiers à copier-coller. C'est la différence qu'il faut connaître avant de lire la suite.
+
 Un seul atelier pour deux formats YouTube, avec une base, un profil et un jeu de clés. L'interface elle-même s'utilise en français ou en anglais.
+
+> **Anciennement YoutubeMate.** Les règles de marque de Google interdisent « YouTube » dans le nom d'une application : le produit est donc renommé. Le nouveau nom **n'est pas encore validé juridiquement** — voir [docs/BRAND_RENAME_CHECKLIST.md](docs/BRAND_RENAME_CHECKLIST.md).
+>
+> **Sous [licence MIT](LICENSE).** Utilisez-le, modifiez-le, auto-hébergez-le, construisez un produit dessus — commercial ou non. **Les contributions sont bienvenues** : voir [CONTRIBUTING.md](CONTRIBUTING.md), et [docs/LICENSING_DECISION.md](docs/LICENSING_DECISION.md) pour le choix de MIT.
+>
+> **Il n'existe ni version hosted ni image Docker.** L'auto-hébergement est le seul moyen de l'utiliser aujourd'hui, en mono-locataire — voir [docs/HOSTED_READINESS.fr.md](docs/HOSTED_READINESS.fr.md).
+
+## Le pipeline Descript → YouTube
+
+C'est là que les autres outils s'arrêtent. À partir d'une transcription, l'application découpe des extraits autonomes avec leurs timecodes source, propose des titres notés, écrit les descriptions, tags et concepts de miniature — puis :
+
+1. **lit vos projets Descript** et vous laisse choisir la source ;
+2. **crée une composition verticale par Short dans ce projet**, nommée avec le titre retenu, portant le texte, les séquences source, les timecodes, la durée cible et, en option, votre vidéo CTA ;
+3. **laisse la composition source intacte** — il ajoute, il ne réécrit jamais votre montage ;
+4. **envoie sur YouTube une vidéo à la fois**, en privé, avec titre, description et tags, derrière un bouton *Tester avec 1 vidéo* qui prouve le chemin avant d'engager un lot ;
+5. **reprend au premier Short manquant** après une interruption, sans rien réenvoyer.
+
+La correspondance entre un Short et sa composition se fait par nom exact : renommer une composition dans Descript produit une erreur claire au lieu de publier la mauvaise vidéo.
+
+### Intégration Descript ou kit CapCut
+
+Deux routes, et la différence n'est pas une préférence :
+
+- **Descript** est une vraie intégration. L'application dialogue avec votre compte, crée les compositions et pilote l'envoi.
+- **CapCut** n'expose aucune API publique permettant de construire une timeline. Le kit n'est pas une intégration au rabais, c'est le substitut honnête : un ZIP contenant le plan de montage en CSV — une ligne par séquence à couper — le texte de chaque Short, les sous-titres SRT, la fiche de publication, la vidéo CTA optionnelle et un mode d'emploi. Tout ce qui peut être préparé à l'avance l'est ; la coupe vous revient.
+
+## Communauté / auto-hébergé
+
+Tout tourne sur votre propre compte Cloudflare avec vos propres clés API, chiffrées au repos et liées à votre identité. C'est **mono-locataire aujourd'hui** : un déploiement, un propriétaire. Lisez [docs/HOSTED_READINESS.fr.md](docs/HOSTED_READINESS.fr.md) avant de l'ouvrir à quiconque — il n'y a pas encore de fournisseur d'authentification vérifié, pas de limitation de débit et pas de procédure de suppression de compte.
+
+## Hosted — prévu
+
+Indisponible. Rien ne tourne, rien n'accepte d'inscription, rien n'est payable. L'écart entre ici et là est écrit dans [docs/HOSTED_READINESS.fr.md](docs/HOSTED_READINESS.fr.md), avec le backlog dans [docs/HOSTED_ROADMAP.md](docs/HOSTED_ROADMAP.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [Débogage](docs/DEBUGGING.fr.md) · [en](docs/DEBUGGING.md) | Installation, variables, symptôme → correction, diagnostic des intégrations |
+| [Contribution](CONTRIBUTING.md) | Branches, migrations, tests d'intégration, règles des routes qui dépensent |
+| [Sécurité](SECURITY.md) | Signalement privé, ce qui est protégé et ce qui ne l'est pas |
+| [Préparation hosted](docs/HOSTED_READINESS.fr.md) · [en](docs/HOSTED_READINESS.md) | Ce qui existe, ce qui n'existe pas |
+| [Feuille de route](docs/HOSTED_ROADMAP.md) | Backlog priorisé avec critères d'acceptation |
+| [Licence](docs/LICENSING_DECISION.md) | Pourquoi MIT, et ce que cela coûte |
+| [Renommage](docs/BRAND_RENAME_CHECKLIST.md) | Ce qui est fait, ce que seul le propriétaire peut faire |
+| [Décisions](docs/adr/) | Registre des décisions d'architecture |
+
+<!-- Captures d'écran et démonstration à ajouter une fois le renommage appliqué aux
+     captures. Aucun placeholder n'est committé : une capture fausse ou cassée est pire
+     que rien. -->
 
 ## Les quatre entrées
 
@@ -15,7 +71,8 @@ Le menu ne classe pas par outil mais par **ce que vous avez déjà en main** : u
 | 🎬 **Package vidéo** | Vidéo longue déjà tournée | un script tourné | titres, description, tags, miniatures |
 | ⚡ **Package Short** | Short déjà monté | un ou plusieurs shorts | titres, descriptions, miniatures verticales |
 | ▤ **Mes projets** | | | l'historique, avec le compteur |
-| ◉ **Ma chaîne & réglages** | | | profil, clés, photo, ADN visuel |
+| ◷ **Credits Usage** | Coûts par projet | | ce que chaque action a réellement coûté |
+| ◉ **Ma chaîne & réglages** | | | profil, clés, photo, logo, ADN visuel |
 
 Les deux premières entrées **produisent la vidéo**, les deux suivantes **habillent une vidéo déjà faite**. « Package » les rapproche volontairement : c'est la même étape du métier, appliquée à deux formats.
 
@@ -52,9 +109,52 @@ Deux détails font la différence entre une orientation suivie et une variante d
 - **Format respecté.** Les dimensions sont transposées selon le pipeline : paysage pour le long, portrait pour les shorts — jamais une image 16:9 recadrée en 9:16.
 - **Votre photo.** Si une photo de présentateur est enregistrée, elle est envoyée avec la demande et l'instruction d'identité prime sur le reste du prompt : le visage doit être **le vôtre**, pas une interprétation. Les miniatures de référence servent au style récurrent de la chaîne, jamais à recopier une composition.
 
+## Le package anglais
+
+La même vidéo, packagée pour un public anglophone : titre, description et texte de
+miniature écrit comme un vrai titre anglais, pas comme une traduction mot à mot.
+
+Il part de la première option, et les trois sont sélectionnables. **Chaque champ est
+modifiable avant qu'une image ne soit payée** — un titre écrit pour un public survit
+rarement intact à la traduction — et vos modifications sont enregistrées avec le
+packaging. La miniature anglaise réutilise le concept déjà retenu pour cette option :
+c'est la même image avec un texte anglais, pas une autre.
+
+## Credits Usage
+
+Chaque appel payant écrit une ligne dans un journal : projet, action, modèle, jetons
+entrants et sortants, images, montant. L'écran affiche le total, la part de chaque projet
+et, en dépliant un projet, le coût de chaque étape — un chiffre se remonte toujours
+jusqu'à l'action qui l'a produit.
+
+Les deux fournisseurs ne sont pas traités pareil, et l'écran le dit. **OpenRouter renvoie
+le montant réellement facturé** sur chaque réponse : il est stocké tel quel, car une table
+de tarifs dans ce dépôt divergerait de la facture au premier changement de prix. **L'API
+images facture des jetons et ne renvoie aucun coût** : ces montants sont calculés à partir
+des tarifs publiés, ce sont donc des estimations.
+
+Les résultats servis par le cache sont enregistrés à coût zéro plutôt qu'ignorés — un
+journal qui se tait quand le cache fonctionne ne peut pas montrer ce qu'il économise.
+
+## Export Word
+
+Un document de travail, pas un résumé. Couverture avec votre logo et le nom de la chaîne,
+fiche de production, recherche, hook et textes fixes, plan de chapitres en tableau, script
+complet découpé sur ses marqueurs de chapitre — le volet de navigation de Word reproduit
+donc votre plan — conclusion, timecodes, les trois options de packaging avec leurs
+concepts de miniature, la description YouTube, les tags, le commentaire épinglé et le quiz
+avec la bonne réponse signalée.
+
+Tout ce qui est destiné à être collé ailleurs vit dans un bloc ombré, sans puce ni
+marqueur, avec une ligne par paragraphe : ce que vous sélectionnez est exactement ce qui
+arrive dans le champ YouTube. Les tableaux, qui se collent mal, sont réservés aux données
+de référence.
+
 ## Ma chaîne & réglages
 
-Un seul écran pour les deux pipelines : **Clés & connexions** (OpenRouter, OpenAI, Descript, YouTube, modèles et qualité d'image) · **Votre photo dans les miniatures** · **ADN visuel des miniatures** (le système éditorial, déduit de vos miniatures de référence et affinable par consigne) · le profil éditorial et le bloc automatique de description.
+Un seul écran pour les deux pipelines : **Clés & connexions** (OpenRouter, OpenAI, Descript, YouTube, modèles et qualité d'image) · **Logo de l'entreprise**, placé en tête des documents Word exportés · **Votre photo dans les miniatures** · **ADN visuel des miniatures** (le système éditorial, déduit de vos miniatures de référence et affinable par consigne) · **Tags par défaut de la chaîne** · le profil éditorial et le bloc automatique de description.
+
+**Les tags par défaut** sont ajoutés après ceux de la vidéo, dans le document exporté. YouTube limite ce champ à 500 caractères — pas à 500 tags, lecture qui fait refuser une vidéo — donc ce qui est compté est la chaîne exacte que vous collez. Au-delà, les tags sont retirés depuis la fin, et c'est pour cela que les tags par défaut viennent en dernier : un tag générique de chaîne est ce qu'il faut sacrifier, un tag écrit pour cette vidéo ne l'est jamais. Les doublons sont retirés, et ce qui a été coupé est nommé dans le document.
 
 ## Principes
 
@@ -100,27 +200,30 @@ Ces propriétés sont vérifiées par la suite de tests : une régression fait �
 ## Vérification
 
 ```bash
-npx tsc --noEmit
-npm run lint
-npx vinext build
-node --test tests/rendered-html.test.mjs
+npm run verify          # typecheck, lint, build, tests
+npm run test:only       # tests alone, against an existing build
 ```
 
-La suite démarre le worker réel et vérifie le rendu, les contrats des routes et une série d'invariants — pas de clé dans un corps de requête, pas d'identité de repli partagée, styles Shorts confinés, ratios de miniatures corrects par format, réponse serveur tardive incapable d'écraser une édition locale.
+La suite démarre le worker réel et vérifie le rendu, les contrats des routes et une série d'invariants — pas de clé dans un corps de requête, pas d'identité inventée, `DEV_USER_ID` refusé en production, clés R2 vérifiées contre le préfixe de leur espèce, styles Shorts confinés, ratios de miniatures corrects par format, dépenses valorisées d'après les chiffres du fournisseur, et réponse serveur tardive incapable d'écraser une édition locale.
+
+Certains chemins sont inatteignables sans identifiants réels — un vrai projet Descript, un vrai envoi, une vraie révocation. Ils ne sont pas truqués pour passer : ils figurent comme vérifications manuelles dans [le guide de débogage](docs/DEBUGGING.fr.md).
 
 ## Architecture
 
 ```
 app/
+  config/product.ts     nom du produit et URLs — un seul endroit, un renommage = une ligne
   script-studio.tsx     shell (nav, langue, alertes, persistance, profil) + pipeline long
   shorts-studio.tsx     pipeline shorts, rendu sous .pipeline-shorts
   shorts-express.tsx    packaging d'un short déjà monté, à l'unité ou en bulk
+  credits-usage.tsx     journal des dépenses, par projet et par action
   globals.css           styles partagés · shorts.css  styles shorts, tous portés
-  lib/capcut-kit.ts     construction du ZIP CapCut, chargée à la demande
-  server/               identity, secrets, http, poll, youtube, ai-cache, image-framing
+  lib/                  capcut-kit, word-export, tags, money, errors — chargés à la demande
+  server/               auth, identity, secrets, http, poll, youtube, ai-cache,
+                        image-framing, headline, pricing, usage
   api/                  routes ; les routes shorts-* sont préfixées
 db/schema.ts            workspaces, integration_settings, ai_cache, shorts_projects,
-                        descript_jobs, youtube_auth, oauth_states
+                        descript_jobs, youtube_auth, oauth_states, usage_events
 ```
 
 Les styles Shorts sont tous portés par `.pipeline-shorts` : les deux feuilles partagent dix-sept noms de classes, et cette contrainte — vérifiée par un test — rend la collision impossible plutôt qu'improbable.

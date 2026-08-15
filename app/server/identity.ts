@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
+import { providerFor, resolveAuthMode, TRUSTED_PROXY_HEADER } from "./auth";
 
-const USER_ID_HEADER = "oai-authenticated-user-id";
+export { TRUSTED_PROXY_HEADER };
 
 export class UnauthorizedError extends Error {
   constructor(readonly code: "authentication_required" | "user_not_allowed") {
@@ -14,14 +15,18 @@ function allowList() {
 }
 
 /**
- * The signed-in ChatGPT user, or null. Never invents an identity: DEV_USER_ID is
- * the only way to get one without the header, and it must stay unset in production —
- * encrypted API keys hang off this id, so a shared fallback would let an anonymous
- * caller spend whoever last used that fallback's credits.
+ * The signed-in user, or null. Never invents an identity.
+ *
+ * The source is decided by AUTH_MODE rather than by whatever header happens to arrive:
+ * outside the trusted-proxy mode, `oai-authenticated-user-id` is ignored, because
+ * anywhere but behind the hosting that sets it, it is attacker-controlled — and
+ * encrypted API keys hang off this id.
  */
 export async function optionalUserId(): Promise<string | null> {
   const requestHeaders = await headers();
-  return requestHeaders.get(USER_ID_HEADER) ?? process.env.DEV_USER_ID ?? null;
+  const mode = resolveAuthMode();
+  const userId = providerFor(mode).identify(requestHeaders);
+  return userId && userId.trim() ? userId.trim() : null;
 }
 
 export async function requireUserId(): Promise<string> {

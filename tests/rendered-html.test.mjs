@@ -9,6 +9,7 @@ const TEST_USER = "test-user";
 process.env.ADMIN_USER_ID ??= TEST_USER;
 process.env.OPENROUTER_API_KEY ??= "test-openrouter-key";
 process.env.OPENAI_API_KEY ??= "test-openai-key";
+process.env.DESCRIPT_API_TOKEN ??= "test-descript-token";
 const signedIn = { "content-type": "application/json", "oai-authenticated-user-id": TEST_USER };
 
 async function render() {
@@ -27,7 +28,7 @@ test("server-renders the YoutubeMate workspace with both pipelines named", async
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /aria-label="YoutubeMate"/i);
+  assert.match(html, /aria-label="CreatorMate"/i);
   assert.match(html, /Script Studio/);
   assert.match(html, /Shorts Studio/);
   assert.match(html, /Hook &amp; intro/);
@@ -47,7 +48,7 @@ test("removes disposable starter assets and keeps product metadata", async () =>
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /<ScriptStudio \/>/);
-  assert.match(layout, /YoutubeMate — de l’idée à la publication/);
+  assert.ok(layout.includes("${product.name} — de l’idée à la publication"), "the OpenGraph title no longer reads the product name from config");
   assert.match(layout, /\/og\.png/);
   assert.doesNotMatch(layout, /next\/font/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
@@ -960,7 +961,7 @@ test("exports the whole project as a Word document built for copy-paste", async 
   // Branding: the logo is embedded, and the document still works without one.
   assert.match(word, /ImageRun/);
   assert.match(word, /if \(input\.logo\)/);
-  assert.match(word, /input\.company \|\| "YoutubeMate"/);
+  assert.match(word, /input\.company \|\| productName/);
   // Word embeds PNG and JPEG only; refusing anything else at upload beats a document
   // that silently comes out logo-less.
   assert.match(logoRoute, /new Set\(\["image\/png", "image\/jpeg"\]\)/);
@@ -1129,4 +1130,465 @@ test("arrives at step 7 with the publishing checklist already ticked", async () 
     assert.ok(base.includes(`${field}:`), `migrateProject drops the optional field "${field}" on every load`);
   }
   assert.ok(optional.includes("publishChecklist"), "the checklist field left the Project type");
+});
+
+test("names the product from one module, and only from there", async () => {
+  const config = await readFile(new URL("../app/config/product.ts", import.meta.url), "utf8");
+  assert.match(config, /name: "CreatorMate"/);
+  // The repository was renamed, so GitHub redirects the old URL — but that redirect dies
+  // the day anyone creates a repository under the old name, including by accident. Every
+  // link has to name the current one.
+  const repoLinks = await Promise.all(["../app/config/product.ts", "../README.md", "../README.fr.md",
+    "../SECURITY.md", "../.github/ISSUE_TEMPLATE/config.yml"].map(file => readFile(new URL(file, import.meta.url), "utf8")));
+  for (const [index, file] of repoLinks.entries()) {
+    assert.doesNotMatch(file, /github\.com\/bkourouma\/YoutubeMate/, `file ${index} still links to the old repository name`);
+  }
+  assert.match(config, /github\.com\/bkourouma\/CreatorMate/);
+  // The former name survives only as a labelled historical fact.
+  assert.match(config, /formerName: "YoutubeMate"/);
+  // ...and nowhere else as the product's name. Renaming a file is not renaming what is
+  // inside it: docs/CreatorMate_differenciateurs.md kept calling the product YoutubeMate
+  // in its title and its closing line.
+  const docs = await readdir(new URL("../docs", import.meta.url));
+  for (const name of docs.filter(file => file.endsWith(".md") && !file.startsWith("Prompt_"))) {
+    const text = await readFile(new URL(`../docs/${name}`, import.meta.url), "utf8");
+    const historical = /BRAND_RENAME|formerly|anciennement|former name|used to be called|was called|is now|renamed/i;
+    for (const [index, line] of text.split("\n").entries()) {
+      if (!line.includes("YoutubeMate")) continue;
+      assert.ok(historical.test(line) || historical.test(name) || line.includes(`bkourouma/YoutubeMate`),
+        `docs/${name}:${index + 1} still calls the product YoutubeMate outside a historical note`);
+    }
+  }
+  // Google's branding guidelines forbid "YouTube" or a variant in an application's
+  // overall name: https://developers.google.com/youtube/terms/branding-guidelines
+  // Only the values matter: the doc comment and `formerName` are meant to record that the
+  // product used to be called something else, and the repository URL still is.
+  const values = config.slice(config.indexOf("export const product")).replace(/formerName:[^\n]*/, "").replace(/repositoryUrl:[^\n]*/, "").replace(/supportUrl:[^\n]*/, "");
+  assert.doesNotMatch(values, /YoutubeMate/);
+  assert.match(config, /formerName: "YoutubeMate"/, "the former name must stay recorded for migration notes");
+
+  const files = await readdir(new URL("../app/", import.meta.url), { recursive: true });
+  const sources = files.filter(name => /\.tsx?$/.test(String(name)));
+  const offenders = [];
+  const posix = name => String(name).split("\\").join("/");
+  for (const name of sources) {
+    if (posix(name) === "config/product.ts") continue;
+    const source = await readFile(new URL(`../app/${posix(name)}`, import.meta.url), "utf8");
+    // Hard-coded product names are what makes a rename a hunt. The config module is the
+    // single exception, and it keeps the former name for migration notes.
+    if (/YoutubeMate|YouTubeMate/.test(source)) offenders.push(posix(name));
+  }
+  assert.deepEqual(offenders, [], `these files still hard-code the old product name: ${offenders.join(", ")}`);
+
+  // Rendered output carries the new name, and the package is renamed without publishing.
+  const html = await (await render()).text();
+  assert.match(html, /CreatorMate/);
+  assert.doesNotMatch(html, /YoutubeMate/);
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.name, "creatormate");
+  assert.notEqual(packageJson.private, false, "the package must not become publishable by this rename");
+
+  // References to YouTube that mean the platform, its API or its rules must survive:
+  // renaming a third-party API would imply it belongs to this product.
+  const studio = await readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8");
+  assert.match(studio, /YouTube/);
+  const checklist = await readFile(new URL("../docs/BRAND_RENAME_CHECKLIST.md", import.meta.url), "utf8");
+  // The rename is not "done" until things outside this repository are done too.
+  for (const external of ["GitHub", "OAuth", "domain", "npm"]) {
+    assert.ok(checklist.includes(external), `the checklist does not mention ${external}`);
+  }
+});
+
+test("decides where an identity may come from, and refuses every other source", { concurrency: false }, async () => {
+  const { resolveAuthMode, providerFor, devUserId, TRUSTED_PROXY_HEADER } = await import("../app/server/auth.ts");
+  const saved = { mode: process.env.AUTH_MODE, dev: process.env.DEV_USER_ID, node: process.env.NODE_ENV };
+  const headersWith = value => ({ get: name => (name === TRUSTED_PROXY_HEADER ? value : null) });
+  try {
+    // Default: the contract the app is deployed under today. This refactor must not take
+    // the running deployment down.
+    delete process.env.AUTH_MODE;
+    assert.equal(resolveAuthMode(), "trusted-proxy-header");
+    assert.equal(providerFor("trusted-proxy-header").identify(headersWith("someone")), "someone");
+    // An unrecognised value must not silently widen trust either way.
+    process.env.AUTH_MODE = "whatever";
+    assert.equal(resolveAuthMode(), "trusted-proxy-header");
+
+    // Outside that mode the header is attacker-controlled, so it is ignored — this is the
+    // whole point: the same code deployed elsewhere used to accept it from anyone.
+    process.env.NODE_ENV = "development";
+    process.env.DEV_USER_ID = "local-dev";
+    assert.equal(providerFor("dev").identify(headersWith("attacker")), "local-dev");
+    // No hosted provider has been chosen, so that mode hands out nothing at all.
+    assert.equal(providerFor("hosted-session").identify(headersWith("attacker")), null);
+
+    // DEV_USER_ID stands in for the entire authentication layer. In production it would
+    // give every anonymous visitor the same identity — and that identity's stored keys.
+    process.env.NODE_ENV = "production";
+    assert.equal(devUserId(), null, "DEV_USER_ID must be refused in production");
+    assert.equal(providerFor("dev").identify(headersWith("attacker")), null);
+    process.env.NODE_ENV = "development";
+    assert.equal(devUserId(), "local-dev");
+  } finally {
+    if (saved.mode === undefined) delete process.env.AUTH_MODE; else process.env.AUTH_MODE = saved.mode;
+    if (saved.dev === undefined) delete process.env.DEV_USER_ID; else process.env.DEV_USER_ID = saved.dev;
+    if (saved.node === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = saved.node;
+  }
+
+  // End to end: a public request carrying no identity gets nothing from a paid route.
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("auth-boundary-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  for (const path of ["/api/openrouter-generate", "/api/openai-image", "/api/shorts-analyze"]) {
+    const response = await worker.fetch(new Request(`http://localhost${path}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+    }), env, ctx);
+    assert.equal(response.status, 401, `${path} answered ${response.status} without an identity`);
+    assert.equal((await response.json()).error, "authentication_required");
+  }
+
+  const identity = await readFile(new URL("../app/server/identity.ts", import.meta.url), "utf8");
+  // The header must be read through the provider, never directly, or the boundary leaks.
+  assert.doesNotMatch(identity, /"oai-authenticated-user-id"/);
+  assert.match(identity, /providerFor\(mode\)\.identify/);
+  assert.doesNotMatch(identity, /process\.env\.DEV_USER_ID/);
+});
+
+test("gives the YouTube grant back on disconnect, and drops a dead refresh token", async () => {
+  const youtube = await readFile(new URL("../app/server/youtube.ts", import.meta.url), "utf8");
+  const integrations = await readFile(new URL("../app/api/integrations/route.ts", import.meta.url), "utf8");
+
+  // Disconnecting used to delete the local row only, leaving the grant standing in the
+  // user's Google account: gone from our side, still listed in theirs.
+  assert.match(youtube, /oauth2\.googleapis\.com\/revoke/);
+  const disconnect = youtube.slice(youtube.indexOf("export async function disconnectYoutube"), youtube.indexOf("async function forgetInvalidGrant"));
+  // Revocation is attempted first, but the local delete runs whatever Google answers:
+  // a network failure at Google must not leave a user unable to disconnect.
+  assert.ok(disconnect.indexOf("/revoke") < disconnect.indexOf("delete(youtubeAuth)"), "revocation must be attempted before the local purge");
+  assert.match(disconnect, /await \(await getDb\(\)\)\.delete\(youtubeAuth\)/);
+  assert.match(disconnect, /catch \{\s*revoked = "remote_failed";/);
+  // 400 means the token was already invalid, which is the outcome we wanted anyway.
+  assert.match(disconnect, /response\.status === 400 \? "revoked"/);
+  // The outcome is reported; the token is not.
+  assert.match(integrations, /revoked, integrations:/);
+  // The status is a fixed vocabulary, never the upstream body, which could echo the token.
+  for (const outcome of ["revoked", "not_connected", "remote_failed"]) assert.ok(disconnect.includes(`"${outcome}"`));
+  assert.doesNotMatch(integrations, /refreshToken|refresh_token/);
+
+  // invalid_grant is terminal. Keeping the row means every later call fails the same way
+  // while the interface still claims to be connected.
+  assert.match(youtube, /data\.error === "invalid_grant"/);
+  const refresh = youtube.slice(youtube.indexOf("export async function getAccessToken"));
+  assert.ok(refresh.indexOf("forgetInvalidGrant") < refresh.indexOf("return data.access_token"), "invalid_grant must drop the connection before returning");
+  // The refresh token is decrypted in one place, so neither path can print it by accident.
+  assert.match(youtube, /async function storedRefreshToken/);
+  assert.doesNotMatch(youtube, /console\.(log|error|warn)/);
+  // The scope stays minimal: uploading is all this product does with the account.
+  assert.match(youtube, /youtube\.upload/);
+  assert.doesNotMatch(youtube, /youtube\.force-ssl|youtubepartner|youtube\.readonly/);
+});
+
+test("holds the Descript contract: one composition per short, source untouched, no token leak", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("descript-contract-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const call = (path, init) => worker.fetch(new Request(`http://localhost${path}`, init), env, ctx);
+
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  const upstream = (handler) => {
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("descriptapi.com") || url.includes("googleapis.com")) {
+        seen.push({ url, method: init?.method ?? "GET", headers: init?.headers ?? {}, body: init?.body });
+        const answer = handler(url, init);
+        if (answer) return answer;
+      }
+      return originalFetch(input, init);
+    };
+  };
+
+  try {
+    // Listing projects.
+    upstream(url => url.includes("/v1/projects?") ? Response.json({ projects: [{ id: "proj-1", name: "Luna" }, { id: "proj-2", name: "WhatsApp" }] }) : null);
+    const list = await call("/api/shorts-descript", { headers: signedIn });
+    assert.equal(list.status, 200);
+    assert.equal((await list.json()).projects.length, 2);
+    // The token travels in a header, never in the URL, where every proxy would log it.
+    const listed = seen.find(entry => entry.url.includes("/v1/projects?"));
+    assert.doesNotMatch(listed.url, /test-descript-token/);
+
+    // A projectId is validated before it can reshape a URL.
+    seen.length = 0;
+    for (const bad of ["../../admin", "proj 1", "proj/1", "a".repeat(65), ""]) {
+      const response = await call("/api/shorts-descript", {
+        method: "POST", headers: signedIn,
+        body: JSON.stringify({ action: "create_compositions", projectId: bad, shorts: [{ title: "T", sequences: [] }] }),
+      });
+      assert.equal(response.status, 400, `projectId "${bad}" was not rejected`);
+      assert.equal((await response.json()).error, "invalid_project_id");
+    }
+    assert.deepEqual(seen, [], "a rejected projectId must never reach Descript");
+
+    // Creating one composition per short.
+    seen.length = 0;
+    upstream(url => {
+      if (url.includes("/v1/agent/models")) return Response.json({ models: [{ id: "m1", name: "fast", cost_tier: "low" }] });
+      if (url.includes("/v1/projects/")) return Response.json({ id: "proj-1", medias: [] });
+      if (url.includes("/agent")) return Response.json({ job_id: "job-1", job_state: "queued" });
+      return null;
+    });
+    const shorts = [
+      // Non-consecutive ranges: the gap between them must not be included.
+      { title: "Luna est gratuit", durationMinutes: 2, sequences: [{ startTime: "00:12", endTime: "00:48" }, { startTime: "03:10", endTime: "03:52" }] },
+      { title: "Ce qui reste bloque", durationMinutes: 1, sequences: [{ startTime: "05:00", endTime: "05:40" }] },
+    ];
+    const created = await call("/api/shorts-descript", {
+      method: "POST", headers: signedIn,
+      body: JSON.stringify({ action: "create_compositions", projectId: "proj-1", includeCtaVideo: false, shorts }),
+    });
+    assert.equal(created.status, 200);
+    assert.equal((await created.json()).job_id, "job-1");
+
+    const agentCall = seen.find(entry => entry.url.includes("/agent") && entry.method === "POST");
+    assert.ok(agentCall, "no agent request was made");
+    const prompt = JSON.parse(String(agentCall.body)).prompt ?? String(agentCall.body);
+    // One composition per short, and the source explicitly protected: the difference
+    // between adding to a project and destroying the user's own edit.
+    assert.match(prompt, /exactement 2 nouvelles compositions/);
+    assert.ok(prompt.includes("sans alt"), "the prompt no longer protects the source composition");
+    // Named with the selected titles, which is what the upload matches on later.
+    for (const short of shorts) assert.ok(prompt.includes(short.title), `the prompt lost the title "${short.title}"`);
+    // Every range travels, in order, with the gaps excluded.
+    for (const time of ["00:12", "00:48", "03:10", "03:52", "05:00", "05:40"]) assert.ok(prompt.includes(time), `timecode ${time} was dropped`);
+    assert.ok(prompt.includes("intervalles"), "the instruction to skip the gaps is gone");
+    // The CTA was not asked for, so it must not be mentioned.
+    assert.doesNotMatch(prompt, /SHORT CTA/);
+    // The token is in the header, not in the body or the URL.
+    assert.doesNotMatch(String(agentCall.body), /test-descript-token/);
+    assert.doesNotMatch(agentCall.url, /test-descript-token/);
+
+    // The CTA is opt-in. The project already holds the clip, which is the second-run
+    // case and also proves the media is never imported — or paid for — twice.
+    seen.length = 0;
+    upstream(url => {
+      if (url.includes("/v1/agent/models")) return Response.json({ models: [{ id: "m1", name: "fast", cost_tier: "low" }] });
+      if (url.includes("/v1/projects/")) return Response.json({ id: "proj-1", media_files: { "SHORT CTA.mp4": {} } });
+      if (url.includes("/agent")) return Response.json({ job_id: "job-2", job_state: "queued" });
+      return null;
+    });
+    // The CTA clip is fetched by Descript from a URL we hand it, so that URL must come
+    // from configuration and never from the request's own Host header.
+    const savedOrigin = process.env.PUBLIC_APP_ORIGIN;
+    delete process.env.PUBLIC_APP_ORIGIN;
+    const noOrigin = await call("/api/shorts-descript", {
+      method: "POST", headers: signedIn,
+      body: JSON.stringify({ action: "create_compositions", projectId: "proj-1", includeCtaVideo: true, shorts }),
+    });
+    assert.equal(noOrigin.status, 503);
+    assert.equal((await noOrigin.json()).error, "public_origin_not_configured");
+
+    process.env.PUBLIC_APP_ORIGIN = "https://studio.example";
+    const withCta = await call("/api/shorts-descript", {
+      method: "POST", headers: signedIn,
+      body: JSON.stringify({ action: "create_compositions", projectId: "proj-1", includeCtaVideo: true, shorts }),
+    });
+    if (savedOrigin === undefined) delete process.env.PUBLIC_APP_ORIGIN; else process.env.PUBLIC_APP_ORIGIN = savedOrigin;
+    assert.equal(withCta.status, 200);
+    const ctaPrompt = JSON.parse(String(seen.find(entry => entry.url.includes("/agent") && entry.method === "POST")?.body ?? "{}")).prompt ?? "";
+    assert.match(ctaPrompt, /SHORT CTA/);
+
+    // Uploading establishes both credentials before touching anything, so a missing
+    // YouTube connection cannot leave a half-rendered composition behind. This harness
+    // has no D1 binding and therefore no stored YouTube grant, which is exactly the
+    // state being asserted here.
+    seen.length = 0;
+    upstream(url => {
+      if (url.includes("descriptapi.com/v1/projects/")) return Response.json({ id: "proj-1", compositions: [{ id: "c1", name: "Un autre nom" }] });
+      return null;
+    });
+    const upload = await call("/api/shorts-upload", {
+      method: "POST", headers: signedIn,
+      body: JSON.stringify({ projectId: "proj-1", title: "Luna est gratuit", description: "d", tags: ["a"] }),
+    });
+    assert.ok([502, 503].includes(upload.status), `expected a closed failure, got ${upload.status}`);
+    const body = await upload.json();
+    assert.ok(["youtube_not_connected", "youtube_token_unavailable"].includes(body.error), `unexpected error ${body.error}`);
+    assert.deepEqual(seen, [], "no render may be requested before both credentials are held");
+    // Whatever the failure, no credential is echoed back to the caller.
+    assert.doesNotMatch(JSON.stringify(body), /test-descript-token|Bearer/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  // Contract properties that are structural rather than per-request.
+  const [descript, upload, poll] = await Promise.all([
+    readFile(new URL("../app/api/shorts-descript/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shorts-upload/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/poll.ts", import.meta.url), "utf8"),
+  ]);
+  // An identical request inside the window must not re-run a paid agent job, and the
+  // ledger is per user: without that, another account's job_id came back to poll.
+  assert.match(descript, /const DEDUPE_WINDOW_MS/);
+  assert.match(descript, /findRecentJob\(userId, key\)/);
+  assert.match(descript, /fingerprint\(\{ version: PROMPT_VERSION, projectId, includeCtaVideo, briefs \}\)/);
+  // Polling is bounded by wall-clock time and says so when it gives up.
+  assert.match(poll, /PollTimeoutError/);
+  assert.match(descript, /descript_timeout/);
+  // One short per upload request: the original looped over every short inside a single
+  // request, so a dropped connection lost every paid render.
+  assert.doesNotMatch(upload, /shorts\?:\s*Array/);
+  assert.match(upload, /privacyStatus: "private"/);
+  assert.match(upload, /item\.name === title/);
+  // Nothing in either module writes to the console, where a token would end up.
+  for (const source of [descript, upload]) assert.doesNotMatch(source, /console\.(log|error|warn)/);
+});
+
+test("states the licence it is actually under, and keeps contributing cheap", async () => {
+  const [licence, readmeEn, readmeFr, contributing, template] = await Promise.all([
+    readFile(new URL("../LICENSE", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../README.fr.md", import.meta.url), "utf8"),
+    readFile(new URL("../CONTRIBUTING.md", import.meta.url), "utf8"),
+    readFile(new URL("../.github/PULL_REQUEST_TEMPLATE.md", import.meta.url), "utf8"),
+  ]);
+  // A public repository with no LICENSE grants nobody anything, whatever it looks like.
+  assert.match(licence, /^MIT License/);
+  assert.match(licence, /Copyright \(c\) \d{4} \S+/);
+  assert.match(licence, /WITHOUT WARRANTY OF ANY KIND/);
+  assert.doesNotMatch(licence, /AFFERO|GENERAL PUBLIC LICENSE/, "a copyleft licence is still in the file");
+  for (const [name, readme] of [["en", readmeEn], ["fr", readmeFr]]) {
+    assert.match(readme, /MIT/, `README.${name} does not state the licence`);
+    assert.doesNotMatch(readme, /AGPL|no LICENSE file yet|pas encore de fichier LICENSE/, `README.${name} is stale on the licence`);
+  }
+  // MIT was chosen to get contributions, so the contributing path must stay one line: a
+  // DCO sign-off, and explicitly no CLA to read.
+  assert.match(contributing, /git commit -s/);
+  assert.match(contributing, /Developer Certificate of\s+Origin/);
+  assert.match(contributing, /no contributor licence agreement to read/i);
+  assert.doesNotMatch(contributing, /no external contribution is being merged/, "contributions are open now");
+  assert.match(template, /git commit -s/);
+});
+
+test("resolves a local identity without the proxy header, and never in production", async () => {
+  // Tested against the module rather than the built worker: the bundler folds NODE_ENV to
+  // a constant and eliminates the branch entirely — DEV_USER_ID does not appear anywhere
+  // in dist/. That is a stronger guarantee than a runtime check, and it is also why the
+  // built artifact cannot demonstrate the development side of this.
+  const { providerFor, devUserId } = await import("../app/server/auth.ts");
+  const noHeaders = { get: () => null };
+  const withHeader = { get: name => (name === "oai-authenticated-user-id" ? "proxy-user" : null) };
+  const previousUser = process.env.DEV_USER_ID;
+  const previousEnv = process.env.NODE_ENV;
+  try {
+    process.env.DEV_USER_ID = "local-developer";
+    delete process.env.NODE_ENV;
+    // Nothing sets the header on a developer's machine. The first version of this refactor
+    // dropped the fallback and 401'd every route locally, and every test passed anyway
+    // because they all send the header.
+    assert.equal(providerFor("trusted-proxy-header").identify(noHeaders), "local-developer");
+    // A real header still wins over the fallback.
+    assert.equal(providerFor("trusted-proxy-header").identify(withHeader), "proxy-user");
+    // In dev mode the header is ignored outright: locally it is attacker-controlled.
+    assert.equal(providerFor("dev").identify(withHeader), "local-developer");
+    // No provider has been chosen for hosted sessions, so it fails closed rather than
+    // guessing an id and handing out that account's encrypted keys.
+    assert.equal(providerFor("hosted-session").identify(withHeader), null);
+
+    process.env.NODE_ENV = "production";
+    assert.equal(devUserId(), null, "DEV_USER_ID granted an identity in production");
+    assert.equal(providerFor("trusted-proxy-header").identify(noHeaders), null);
+    // The proxy header keeps working in production — that is the deployed contract.
+    assert.equal(providerFor("trusted-proxy-header").identify(withHeader), "proxy-user");
+  } finally {
+    if (previousUser === undefined) delete process.env.DEV_USER_ID; else process.env.DEV_USER_ID = previousUser;
+    if (previousEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousEnv;
+  }
+});
+
+test("packages the video in English without waiting for a vidIQ sync", async () => {
+  const [studio, route] = await Promise.all([
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
+  ]);
+  // The model writes the English headline too, so a thumbnail can carry English text
+  // rather than the French overlay, and it is rejected if it comes back missing.
+  assert.match(route, /"englishOverlay": "THE SAME HEADLINE IN ENGLISH/);
+  assert.match(route, /not a word-for-word translation/);
+  assert.match(route, /typeof option\.englishOverlay === "string" && option\.englishOverlay\.trim\(\)/);
+
+  // The English title and description already existed but only appeared after a vidIQ
+  // sync, which needs a personal relay — so most runs generated them and never showed
+  // them. The English package renders from the packaging alone.
+  assert.match(studio, /function EnglishPackage/);
+  assert.match(studio, /<EnglishPackage pack=\{pack\}/);
+  const section = studio.slice(studio.indexOf("function EnglishPackage"), studio.indexOf("function Question"));
+  assert.doesNotMatch(section, /vidiq/i, "the English package still depends on vidIQ");
+
+  // Every field is editable, and the edits persist with the packaging.
+  for (const field of ["title", "description", "overlay"]) {
+    assert.ok(section.includes(`edit({ ${field}:`), `the English ${field} cannot be edited`);
+  }
+  assert.match(studio, /english\?: \{ optionId: string; title: string; description: string; overlay: string \}/);
+  // It derives from the first option by default, and any option can be picked instead.
+  assert.match(section, /pack\.options\.find\(option => option\.id === value\.english\?\.optionId\) \?\? pack\.options\[0\]/);
+  assert.match(section, /update\(\{ english: englishFor\(option\) \}\)/);
+  // Packages generated before englishOverlay existed still get a starting point.
+  assert.match(studio, /option\.englishOverlay\s*\n?\s*\?\?/);
+  // The image is generated from the English headline, never the French one.
+  const generator = studio.slice(studio.indexOf("const generateEnglishThumbnail"), studio.indexOf("const generateThumbnails"));
+  assert.match(generator, /overlay: english\.overlay/);
+  assert.doesNotMatch(generator, /overlay: option\.overlay/);
+  // And it refuses to spend on an empty headline.
+  assert.match(generator, /if \(!english\.overlay\.trim\(\)\) return showToast/);
+});
+
+test("keeps both READMEs in step and current with what shipped", async () => {
+  const [en, fr] = await Promise.all([
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../README.fr.md", import.meta.url), "utf8"),
+  ]);
+  // They have drifted twice: a menu entry shipped without being listed, and features
+  // documented in one language only. Shape is the cheap proxy for substance.
+  const shape = text => ({
+    headings: (text.match(/^#{1,3} /gm) ?? []).length,
+    tableRows: (text.match(/^\|/gm) ?? []).length,
+    codeFences: (text.match(/^```/gm) ?? []).length,
+  });
+  assert.deepEqual(shape(en), shape(fr), "the two READMEs no longer have the same structure");
+  // Each links to the other, so a reader lands in their language from either side.
+  assert.match(en, /\[Français\]\(README\.fr\.md\)/);
+  assert.match(fr, /\[English\]\(README\.md\)/);
+
+  // Every menu entry in the app has to appear in the table, in both languages. The
+  // Credits Usage entry shipped and went unlisted for four commits.
+  const studio = await readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8");
+  const labelsStart = studio.indexOf("const labels = {");
+  const labels = studio.slice(labelsStart, studio.indexOf("validate:", labelsStart));
+  for (const key of ["studio", "shorts", "express", "shortsExpress", "navProjects", "usage", "profile"]) {
+    const label = labels.match(new RegExp(String.raw`\b${key}: "([^"]+)"`))?.[1];
+    assert.ok(label, `no French label found for the ${key} menu`);
+    assert.ok(fr.includes(label), `README.fr.md does not list the "${label}" menu`);
+  }
+
+  // Features that cost money or change what the user gets must be findable.
+  for (const [name, needleEn, needleFr] of [
+    ["English package", "English package", "package anglais"],
+    ["Credits Usage", "Credits Usage", "Credits Usage"],
+    ["Word export", "Word export", "Export Word"],
+    ["default tags", "Default tags", "tags par défaut"],
+    ["company logo", "Company logo", "Logo de l'entreprise"],
+  ]) {
+    assert.ok(en.toLowerCase().includes(needleEn.toLowerCase()), `README.md does not document ${name}`);
+    assert.ok(fr.toLowerCase().includes(needleFr.toLowerCase()), `README.fr.md does not document ${name}`);
+  }
+  // The architecture tree must name the tables that exist, or it misleads a newcomer.
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  for (const table of [...schema.matchAll(/sqliteTable\("(\w+)"/g)].map(match => match[1])) {
+    assert.ok(en.includes(table), `the architecture tree omits the ${table} table`);
+    assert.ok(fr.includes(table), `l'arbre d'architecture omet la table ${table}`);
+  }
 });

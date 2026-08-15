@@ -1,0 +1,27 @@
+name: Feature request
+description: Something the product should be able to do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do today, and where it breaks down. Not the solution.
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+    validations: { required: true }
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: The workaround, if there is one. This says a lot about the priority.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This does not ask the product to publish, decide or claim anything without a human check
+          required: true
