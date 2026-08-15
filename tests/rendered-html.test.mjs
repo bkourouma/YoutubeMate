@@ -1229,3 +1229,37 @@ test("decides where an identity may come from, and refuses every other source", 
   assert.match(identity, /providerFor\(mode\)\.identify/);
   assert.doesNotMatch(identity, /process\.env\.DEV_USER_ID/);
 });
+
+test("gives the YouTube grant back on disconnect, and drops a dead refresh token", async () => {
+  const youtube = await readFile(new URL("../app/server/youtube.ts", import.meta.url), "utf8");
+  const integrations = await readFile(new URL("../app/api/integrations/route.ts", import.meta.url), "utf8");
+
+  // Disconnecting used to delete the local row only, leaving the grant standing in the
+  // user's Google account: gone from our side, still listed in theirs.
+  assert.match(youtube, /oauth2\.googleapis\.com\/revoke/);
+  const disconnect = youtube.slice(youtube.indexOf("export async function disconnectYoutube"), youtube.indexOf("async function forgetInvalidGrant"));
+  // Revocation is attempted first, but the local delete runs whatever Google answers:
+  // a network failure at Google must not leave a user unable to disconnect.
+  assert.ok(disconnect.indexOf("/revoke") < disconnect.indexOf("delete(youtubeAuth)"), "revocation must be attempted before the local purge");
+  assert.match(disconnect, /await \(await getDb\(\)\)\.delete\(youtubeAuth\)/);
+  assert.match(disconnect, /catch \{\s*revoked = "remote_failed";/);
+  // 400 means the token was already invalid, which is the outcome we wanted anyway.
+  assert.match(disconnect, /response\.status === 400 \? "revoked"/);
+  // The outcome is reported; the token is not.
+  assert.match(integrations, /revoked, integrations:/);
+  // The status is a fixed vocabulary, never the upstream body, which could echo the token.
+  for (const outcome of ["revoked", "not_connected", "remote_failed"]) assert.ok(disconnect.includes(`"${outcome}"`));
+  assert.doesNotMatch(integrations, /refreshToken|refresh_token/);
+
+  // invalid_grant is terminal. Keeping the row means every later call fails the same way
+  // while the interface still claims to be connected.
+  assert.match(youtube, /data\.error === "invalid_grant"/);
+  const refresh = youtube.slice(youtube.indexOf("export async function getAccessToken"));
+  assert.ok(refresh.indexOf("forgetInvalidGrant") < refresh.indexOf("return data.access_token"), "invalid_grant must drop the connection before returning");
+  // The refresh token is decrypted in one place, so neither path can print it by accident.
+  assert.match(youtube, /async function storedRefreshToken/);
+  assert.doesNotMatch(youtube, /console\.(log|error|warn)/);
+  // The scope stays minimal: uploading is all this product does with the account.
+  assert.match(youtube, /youtube\.upload/);
+  assert.doesNotMatch(youtube, /youtube\.force-ssl|youtubepartner|youtube\.readonly/);
+});

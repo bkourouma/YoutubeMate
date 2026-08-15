@@ -60,8 +60,11 @@ export async function DELETE(request: Request) {
     const service = new URL(request.url).searchParams.get("service");
     if (service === "youtube") {
       try {
-        await disconnectYoutube(userId);
-        return Response.json({ ok: true, integrations: await integrationStatus(userId), youtube: await youtubeStatus(userId) });
+        // The local purge is guaranteed; the revocation at Google is reported so the
+        // user is told when the app is still listed in their Google account. The token
+        // itself never appears in this response.
+        const { revoked } = await disconnectYoutube(userId);
+        return Response.json({ ok: true, revoked, integrations: await integrationStatus(userId), youtube: await youtubeStatus(userId) });
       } catch {
         return Response.json({ error: "youtube_disconnect_failed" }, { status: 502 });
       }

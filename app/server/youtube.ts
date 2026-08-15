@@ -104,25 +104,71 @@ export async function youtubeStatus(userId: string) {
   }
 }
 
-export async function disconnectYoutube(userId: string) {
-  await (await getDb()).delete(youtubeAuth).where(eq(youtubeAuth.userId, userId));
-}
-
-/** A fresh access token for this user. Access tokens are never stored. */
-export async function getAccessToken(userId: string) {
+/**
+ * Reads the stored refresh token, or null if there is none or it cannot be decrypted.
+ * Separated out because both refreshing and revoking need it, and neither may leak it.
+ */
+async function storedRefreshToken(userId: string) {
   const [row] = await (await getDb()).select().from(youtubeAuth).where(eq(youtubeAuth.userId, userId)).limit(1);
-  if (!row) throw new YoutubeNotConnectedError();
-  let refreshToken: string;
+  if (!row) return null;
   try {
     const clear = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: fromBase64(row.iv), additionalData: additionalData(userId) },
       await encryptionKey(),
       fromBase64(row.refreshTokenEncrypted),
     );
-    refreshToken = new TextDecoder().decode(clear);
+    return new TextDecoder().decode(clear);
   } catch {
-    throw new YoutubeNotConnectedError();
+    return null;
   }
+}
+
+/**
+ * Disconnecting used to delete the local row and stop there, which leaves the grant
+ * standing in the user's Google account: the app disappears from our side and remains in
+ * theirs. Google's user-data policy expects the authorisation to be given back, so the
+ * token is revoked first.
+ *
+ * The local purge happens whatever Google answers. A network failure at Google must not
+ * leave a user unable to disconnect, so the revocation outcome is reported rather than
+ * thrown — and the token never appears in that report.
+ * https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke
+ */
+export async function disconnectYoutube(userId: string): Promise<{ revoked: "revoked" | "not_connected" | "remote_failed" }> {
+  let revoked: "revoked" | "not_connected" | "remote_failed" = "not_connected";
+  const refreshToken = await storedRefreshToken(userId);
+  if (refreshToken) {
+    try {
+      const response = await fetchUpstream("https://oauth2.googleapis.com/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: refreshToken }).toString(),
+        timeoutMs: 15_000,
+      });
+      // Google answers 400 for a token that is already invalid, which is success for us.
+      revoked = response.ok || response.status === 400 ? "revoked" : "remote_failed";
+    } catch {
+      revoked = "remote_failed";
+    }
+  }
+  await (await getDb()).delete(youtubeAuth).where(eq(youtubeAuth.userId, userId));
+  return { revoked };
+}
+
+/**
+ * A refresh token that Google reports as invalid_grant will never work again — the user
+ * revoked it, changed their password, or it expired. Keeping the row means every later
+ * call fails the same way while the interface still claims to be connected, so the
+ * connection is dropped and a reconnection is asked for.
+ */
+async function forgetInvalidGrant(userId: string) {
+  await (await getDb()).delete(youtubeAuth).where(eq(youtubeAuth.userId, userId));
+}
+
+/** A fresh access token for this user. Access tokens are never stored. */
+export async function getAccessToken(userId: string) {
+  const refreshToken = await storedRefreshToken(userId);
+  if (!refreshToken) throw new YoutubeNotConnectedError();
   const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret) throw new Error("google_client_not_configured");
@@ -133,6 +179,12 @@ export async function getAccessToken(userId: string) {
     timeoutMs: 20_000,
   });
   const data = await response.json() as { access_token?: string; error?: string };
+  // invalid_grant is terminal, not transient: the stored token is dead and every later
+  // call would fail identically while the interface still showed "connected".
+  if (data.error === "invalid_grant") {
+    await forgetInvalidGrant(userId);
+    throw new YoutubeNotConnectedError();
+  }
   if (!response.ok || !data.access_token) throw new YoutubeNotConnectedError();
   return data.access_token;
 }
