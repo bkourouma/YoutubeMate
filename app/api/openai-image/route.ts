@@ -1,6 +1,7 @@
 import { requireApiKey } from "../../server/secrets";
 import { fetchUpstream, isTimeout } from "../../server/http";
 import { framingFor, presenterBrief, type Pipeline } from "../../server/image-framing";
+import { allowHeadlineText, headlineDirective } from "../../server/headline";
 
 type ImageRequest = {
   pipeline?: Pipeline;
@@ -46,7 +47,12 @@ export async function POST(request: Request) {
   // presenter instruction comes last and overrides, because an editorial system prompt
   // written for generic stock people would otherwise erase the channel's own face.
   const styleBrief = "The thumbnail reference images show the channel's recurring visual language: match their style, never copy a particular thumbnail's composition.";
-  const composedPrompt = `${editorialSystem ? `EDITORIAL SYSTEM TO FOLLOW:\n${editorialSystem}\n\n` : ""}${prompt}\n${framing.brief} ${styleBrief}${overlay ? ` Add the exact large headline: "${overlay}".` : ""}${channel ? ` Add the small channel label: "${channel}".` : ""} Do not add any other words, logos, or watermarks. Keep all essential faces, objects, and text inside a centered safe area.${presenterKey ? `\n\nOVERRIDING REQUIREMENT — THE PRESENTER: ${presenterBrief(pipeline)}` : ""}`;
+  // With a headline to render, the concept's own ban on lettering is stripped and the
+  // headline is stated as an override — the composed prompt used to ask for a large
+  // headline one line after forbidding every letter.
+  const scene = overlay ? allowHeadlineText(prompt) : prompt;
+  const noWords = overlay ? "" : " Do not add any words, logos, or watermarks.";
+  const composedPrompt = `${editorialSystem ? `EDITORIAL SYSTEM TO FOLLOW:\n${editorialSystem}\n\n` : ""}${scene}\n${framing.brief} ${styleBrief}${noWords} Keep all essential faces, objects, and text inside a centered safe area.${overlay ? `\n\n${headlineDirective(overlay, channel)}` : ""}${presenterKey ? `\n\nOVERRIDING REQUIREMENT — THE PRESENTER: ${presenterBrief(pipeline)}` : ""}`;
 
   try {
     // The presenter photo travels as a reference image too, so the model can keep the

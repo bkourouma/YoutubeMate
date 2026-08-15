@@ -822,3 +822,57 @@ test("turns server error codes into an instruction, never a bare code", async ()
     assert.deepEqual(rawInAlert, [], `${name} shows a raw server code in an alert`);
   }
 });
+
+test("asks for the headline without forbidding it in the same prompt", async () => {
+  const { allowHeadlineText, headlineDirective } = await import("../app/server/headline.ts");
+  // The concept prompts end with this ban, written when the headline was going to be
+  // added outside the image. The composer asked for a large headline right after it.
+  const concept = "Create a high-contrast 16:9 YouTube thumbnail. Leave a large clean area on the upper right for the separate headline. No text, no letters, no numbers, no logo, no watermark, no brand marks.";
+  const cleaned = allowHeadlineText(concept);
+  assert.doesNotMatch(cleaned, /no text|no letters|no numbers/i);
+  // Everything that is not about lettering survives, including the reserved area.
+  // Re-capitalised, because dropping the ban promoted it to the head of the sentence.
+  assert.match(cleaned, /No logo, no watermark, no brand marks\./);
+  assert.match(cleaned, /large clean area on the upper right/);
+  // A ban that carries composition with it is left alone; the override settles it.
+  const composition = "Use a clean background with no text overlay and a bright green glow.";
+  assert.equal(allowHeadlineText(composition), composition);
+  // Dropping the closing clause must not take the full stop with it.
+  assert.equal(allowHeadlineText("Cinematic close-up, dramatic rim light, no lettering."), "Cinematic close-up, dramatic rim light.");
+
+  const directive = headlineDirective('Luna 5.6 GRATUIT ?', "Envol IA");
+  // French headlines are where an image model drifts: it translates, or drops accents.
+  assert.match(directive, /character for character/);
+  assert.match(directive, /every accent and punctuation mark/);
+  assert.match(directive, /Do not translate any of this text/);
+  assert.match(directive, /"Luna 5\.6 GRATUIT \?"/);
+  assert.match(directive, /"Envol IA"/);
+  assert.match(directive, /120 pixels wide/);
+  // The model may render the supporting text a concept asks for — a badge, a number —
+  // but only what the concept quotes, so it never invents lettering of its own.
+  assert.match(directive, /Any further words the composition quotes/);
+  assert.match(directive, /no invented lettering/);
+
+  const [image, packaging, shortsExpress, conceptPrompt] = await Promise.all([
+    readFile(new URL("../app/api/openai-image/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shorts-express/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/concept-prompt/route.ts", import.meta.url), "utf8"),
+  ]);
+  // No generator may go back to asking for text-free prompts while the model renders text.
+  for (const [name, route] of [["packaging", packaging], ["shorts-express", shortsExpress], ["concept-prompt", conceptPrompt]]) {
+    assert.doesNotMatch(route, /no text because|no lettering because|no text, no lettering/i, `${name} still orders text-free prompts`);
+    assert.match(route, /rendered into the image/, `${name} does not say the headline is rendered`);
+    // On-image words must be quoted and written in the viewer's language, or a French
+    // thumbnail comes back carrying an English badge.
+    assert.match(route, /quoted exactly and written in \$\{language\}/, `${name} does not fix the language of on-image text`);
+  }
+  // The presenter override has to stay last, or an editorial system prompt written for
+  // stock people erases the channel's own face.
+  // The whole line: the template literal nests backticks, so a lazy match truncates it
+  // and every indexOf below silently returns -1.
+  const composed = image.match(/^ *const composedPrompt = .*$/m)[0];
+  assert.ok(composed.includes("headlineDirective") && composed.includes("presenterBrief"), "composed prompt not captured");
+  assert.ok(composed.indexOf("headlineDirective") < composed.indexOf("presenterBrief"), "the presenter requirement must come last");
+  assert.doesNotMatch(composed, /Add the exact large headline/);
+});
