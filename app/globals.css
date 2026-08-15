@@ -277,8 +277,18 @@ button { cursor:pointer; }
 @media (max-width:650px) { .legacy-keys-banner { grid-template-columns:24px minmax(0,1fr); }.legacy-keys-banner button { grid-column:2; justify-self:start; } }
 .sidebar nav button.with-hint { align-items:flex-start; padding-block:9px; }
 .sidebar nav button.with-hint > span:first-child { margin-top:1px; }
-.nav-label { display:flex; flex-direction:column; gap:3px; min-width:0; width:auto; text-align:left; color:inherit; }
-.nav-label small { color:#7e918a; font-size:8px; line-height:1.35; }
+/* flex:1 is what keeps the label from collapsing to min-content, which wrapped every
+   word onto its own line. */
+/* flex:1 is what keeps the label from collapsing to min-content, which wrapped every
+   word onto its own line. nowrap then guarantees the two-line shape — one line of
+   title, one of hint — and ellipsis degrades a longer future label gracefully instead
+   of silently breaking it. */
+.nav-label { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; text-align:left; color:inherit; line-height:1.2; }
+.nav-label,.nav-label small { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nav-label small { color:#7e918a; font-size:8.5px; line-height:1.3; }
+.sidebar nav button { font-size:10.5px; }
+.save-state.failed { color:#8d2f2f; font-weight:700; }
+.save-state.failed i { background:#8d2f2f; }
 .sidebar nav button:hover .nav-label small,.sidebar nav button.active .nav-label small { color:#a9bcb3; }
 .sidebar nav button.upcoming { opacity:.62; }
 .sidebar nav button.upcoming:hover { opacity:.85; }

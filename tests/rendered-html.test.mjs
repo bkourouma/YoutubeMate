@@ -491,6 +491,28 @@ test("ports the Shorts data routes with identity, caps and its cue logic intact"
   assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
 });
 
+test("never lets a late hydration discard work, and reports a failed save", async () => {
+  const studio = await readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8");
+  // Creating a project while GET /api/workspace was still in flight used to lose it:
+  // the response replaced projects and activeId wholesale, snapping back to the stored
+  // active project, and nothing had been saved because writes wait on hydration.
+  assert.match(studio, /const workspaceTouched = useRef\(false\)/);
+  assert.match(studio, /if \(workspaceTouched\.current\) return;/);
+  assert.match(studio, /const touchWorkspace = \(\) => \{ workspaceTouched\.current = true; \}/);
+  // Every entry point that edits the workspace must mark it.
+  assert.match(studio, /const editProfile = .*touchWorkspace\(\)/);
+  assert.match(studio, /const editExpress = .*touchWorkspace\(\)/);
+  assert.match(studio, /setProfile=\{editProfile\}/);
+  assert.match(studio, /setValue=\{editExpress\}/);
+  // A rejected write was swallowed and still reported as saved.
+  assert.doesNotMatch(studio, /body: JSON\.stringify\(payload\) \}\)\.catch\(\(\) => null\)/);
+  assert.match(studio, /response\.status === 413 \? "too-large" : "error"/);
+  assert.match(studio, /Non sauvegardé/);
+  // Pasting an outline as the subject must not become the project title.
+  assert.match(studio, /function projectTitleFrom/);
+  assert.match(studio, /title: projectTitleFrom\(newSubject\)/);
+});
+
 test("prepares the presenter photo in the browser and names what failed", async () => {
   const [studio, route] = await Promise.all([
     readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),

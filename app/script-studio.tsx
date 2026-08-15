@@ -129,6 +129,25 @@ const labels = {
 
 function wordCount(value: string) { return value.trim() ? value.trim().split(/\s+/).length : 0; }
 
+/**
+ * A readable name for the project list and the breadcrumb. Pasting a full outline as the
+ * subject is normal and useful — it feeds the AI — but the whole block made an unusable
+ * title, so take the first line that carries a real sentence.
+ */
+function projectTitleFrom(subject: string) {
+  const lines = subject.split("\n").map(line => line.trim()).filter(Boolean);
+  const meaningful = lines.find(line => {
+    const withoutMarkers = line.replace(/^[\d.)#\-–—*•\s]+/, "").replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}️\s]+/gu, "").trim();
+    // Skip lead-ins like "Voici une structure de vidéo en 5 chapitres :" that end in a colon.
+    return withoutMarkers.length >= 12 && !/[:：]$/.test(withoutMarkers);
+  });
+  const candidate = (meaningful ?? lines[0] ?? subject).trim()
+    .replace(/^[\d.)#\-–—*•\s]+/, "")
+    .replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}️\s]+/gu, "")
+    .trim();
+  return candidate.length > 90 ? `${candidate.slice(0, 87).trimEnd()}…` : candidate || subject.trim().slice(0, 90);
+}
+
 // Up to two automatic retries (1.5 s then 4 s) on retryable statuses or a network
 // failure. Client-side on purpose: each attempt opens a fresh HTTP request instead of
 // stretching one long one.
@@ -299,7 +318,7 @@ export default function ScriptStudio() {
   const [activeId, setActiveId] = useState(demoProjects[0].id);
   const [auto, setAuto] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
+  const [saveState, setSaveState] = useState<"saved" | "saving" | "error" | "too-large">("saved");
   const [newOpen, setNewOpen] = useState(false);
   const [newSubject, setNewSubject] = useState("");
   const [prompter, setPrompter] = useState(false);
@@ -310,6 +329,8 @@ export default function ScriptStudio() {
   const [bodyProgress, setBodyProgress] = useState<{ current: number; total: number; title: string; retrying: boolean } | null>(null);
   const bodyRunId = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set by anything that edits the workspace, so a late hydration cannot clobber it.
+  const workspaceTouched = useRef(false);
   const alertTimers = useRef(new Map<string, { count: number; timer: ReturnType<typeof setTimeout> }>());
   const t = labels[lang];
   const project = projects.find(p => p.id === activeId) ?? projects[0];
@@ -348,6 +369,10 @@ export default function ScriptStudio() {
     }
     setCredentialsHydrated(true);
     fetch("/api/workspace").then(r => r.json() as Promise<{ payload?: { profile: Profile; projects: Array<Partial<Project>>; activeId: string; express?: ExpressState } }>).then(data => {
+      // Never overwrite work started before this response landed: creating a project
+      // while the request was in flight used to lose it and snap back to the stored
+      // active project, with nothing saved because writes wait on hydration.
+      if (workspaceTouched.current) return;
       if (data.payload?.projects?.length) {
         const nextProfile = { ...profileDemo, ...data.payload.profile };
         const nextProjects = data.payload.projects.map(item => migrateProject(item, nextProfile));
@@ -403,7 +428,11 @@ export default function ScriptStudio() {
     setSaveState("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      fetch("/api/workspace", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null).finally(() => setSaveState("saved"));
+      // A rejected write used to be swallowed and still reported as saved, so work could
+      // be lost while the indicator said everything was fine.
+      fetch("/api/workspace", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
+        .then(response => setSaveState(response.ok ? "saved" : response.status === 413 ? "too-large" : "error"))
+        .catch(() => setSaveState("error"));
     }, 700);
   }, [profile, projects, activeId, express, lang, hydrated]);
 
@@ -435,7 +464,12 @@ export default function ScriptStudio() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [alerts.length]);
 
+  const touchWorkspace = () => { workspaceTouched.current = true; };
+  const editProfile = (next: Profile) => { touchWorkspace(); setProfile(next); };
+  const editExpress = (next: ExpressState) => { touchWorkspace(); setExpress(next); };
+
   const updateProject = (patch: Partial<Project>) => {
+    touchWorkspace();
     // Central invalidation: every path that clears the body also cancels any in-flight
     // section loop and drops the resumable prefix, so a stale loop can never resurrect
     // an obsolete body over fresh inputs.
@@ -488,7 +522,8 @@ export default function ScriptStudio() {
       return;
     }
     const draft = { hook: "", promise: "", body: "", conclusion: "" };
-    const next: Project = { id: crypto.randomUUID(), title: newSubject.trim(), subject: newSubject.trim(), status: lang === "fr" ? "Idée" : "Idea", updated: lang === "fr" ? "À l’instant" : "Just now", step: 1, confirmed: false, completed: [], ...draft, reviewAccepted: false, packageAnswers: { visual: "", timecodes: "", links: "" }, workflowVersion: 2, chapters: [], bodyWordTarget: scriptPlan(profile, draft).targetBodyWords };
+    const next: Project = { id: crypto.randomUUID(), title: projectTitleFrom(newSubject), subject: newSubject.trim(), status: lang === "fr" ? "Idée" : "Idea", updated: lang === "fr" ? "À l’instant" : "Just now", step: 1, confirmed: false, completed: [], ...draft, reviewAccepted: false, packageAnswers: { visual: "", timecodes: "", links: "" }, workflowVersion: 2, chapters: [], bodyWordTarget: scriptPlan(profile, draft).targetBodyWords };
+    touchWorkspace();
     setProjects(items => [next, ...items]); setActiveId(next.id); setNewSubject(""); setNewOpen(false); setView("studio");
   };
 
@@ -753,7 +788,12 @@ export default function ScriptStudio() {
       <main className="main-area">
         {view === "studio" && <>
           <header className="topbar">
-            <div><div className="breadcrumb">{t.projects} <span>/</span> <strong>{project.title}</strong></div><div className="save-state"><i />{saveState === "saved" ? t.saved : (lang === "fr" ? "Sauvegarde…" : "Saving…")}</div></div>
+            <div><div className="breadcrumb">{t.projects} <span>/</span> <strong>{project.title}</strong></div><div className={`save-state ${saveState === "error" || saveState === "too-large" ? "failed" : ""}`} role={saveState === "error" || saveState === "too-large" ? "alert" : undefined}><i />{
+              saveState === "saved" ? t.saved
+              : saveState === "saving" ? (lang === "fr" ? "Sauvegarde…" : "Saving…")
+              : saveState === "too-large" ? (lang === "fr" ? "Non sauvegardé : projet trop volumineux" : "Not saved: project too large")
+              : (lang === "fr" ? "Non sauvegardé — vérifiez votre connexion" : "Not saved — check your connection")
+            }</div></div>
             <div className="top-actions"><label className="pilot-switch"><span>{t.pilot}</span><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /><i /></label><button className="secondary" onClick={() => setPrompter(true)}>▣ {t.script}</button><button className="dark-button" onClick={download}>↓ {t.export}</button></div>
           </header>
           <section className="stepper" aria-label="Pipeline">
@@ -774,8 +814,8 @@ export default function ScriptStudio() {
         {view === "shorts" && <ShortsStudio lang={lang} openrouterReady={integrations.openrouter.configured} openaiReady={integrations.openai.configured} writerModel={aiSettings.writerModel} imageModel={aiSettings.imageModel} imageQuality={aiSettings.imageQuality} channel={profile.channel} thumbnailSystemPrompt={profile.thumbnailSystemPrompt ?? ""} referenceKeys={referenceThumbnails.map(reference => reference.key)} presenterKey={presenterPhoto?.key ?? ""} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
         {view === "shorts-express" && <ShortsExpress lang={lang} openrouterReady={integrations.openrouter.configured} openaiReady={integrations.openai.configured} writerModel={aiSettings.writerModel} imageModel={aiSettings.imageModel} imageQuality={aiSettings.imageQuality} channel={profile.channel} thumbnailSystemPrompt={profile.thumbnailSystemPrompt ?? ""} referenceKeys={referenceThumbnails.map(reference => reference.key)} presenterKey={presenterPhoto?.key ?? ""} profile={{ channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, descriptionFooter: profile.descriptionFooter }} showToast={showToast} copy={copy} openSettings={() => setView("profile")} postJson={postJsonWithRetry} connectionLost={connectionLostMessage} />}
         {view === "projects" && <Projects projects={projects} activeId={activeId} lang={lang} t={t} open={id => { setActiveId(id); setView("studio"); }} create={() => setNewOpen(true)} />}
-        {view === "express" && <ExpressPackagingAI value={express} setValue={setExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterPhoto?.key ?? ""} openAiSettings={() => setView("profile")} />}
-        {view === "profile" && <ProfilePageAI profile={profile} setProfile={setProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} youtube={youtube} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} presenterPhoto={presenterPhoto} reloadPresenter={loadPresenterPhoto} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
+        {view === "express" && <ExpressPackagingAI value={express} setValue={editExpress} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterPhoto?.key ?? ""} openAiSettings={() => setView("profile")} />}
+        {view === "profile" && <ProfilePageAI profile={profile} setProfile={editProfile} lang={lang} t={t} aiSettings={aiSettings} setAiSettings={setAiSettings} integrations={integrations} youtube={youtube} refreshIntegrations={refreshIntegrations} legacyKeysFound={legacyKeysFound} clearLegacyKeys={() => { localStorage.removeItem("script-studio-ai-credentials"); setLegacyKeysFound(false); }} openRouterModels={openRouterModels} referenceThumbnails={referenceThumbnails} reloadReferences={loadReferenceThumbnails} presenterPhoto={presenterPhoto} reloadPresenter={loadPresenterPhoto} showToast={showToast} done={() => { showToast(lang === "fr" ? "Profil enregistré" : "Profile saved"); setView("studio"); }} />}
       </main>
       {newOpen && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title"><button className="modal-close" onClick={() => setNewOpen(false)}>×</button><span className="eyebrow">{lang === "fr" ? "NOUVEAU PROJET" : "NEW PROJECT"}</span><h2 id="new-project-title">{t.addSubject}</h2><p>{lang === "fr" ? "Soyez précis : le studio ne recherchera jamais une catégorie plus large." : "Be specific: the studio will never research a broader category."}</p><textarea value={newSubject} maxLength={2000} onChange={e => setNewSubject(e.target.value)} placeholder={lang === "fr" ? "Ex. Comment utiliser l’IA pour répondre aux clients sur WhatsApp Business" : "E.g. How to use AI to answer customers on WhatsApp Business"} /><div className="modal-actions"><button className="ghost" onClick={() => setNewOpen(false)}>{t.cancel}</button><button className="primary" onClick={createProject}>{t.create} →</button></div></div></div>}
       {alerts.length > 0 && <div className="alert-stack" aria-live="polite" aria-relevant="additions" onMouseEnter={() => setAlertsPaused(true)} onMouseLeave={() => setAlertsPaused(false)} onFocusCapture={() => setAlertsPaused(true)} onBlurCapture={() => setAlertsPaused(false)}>
