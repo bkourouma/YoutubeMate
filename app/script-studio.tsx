@@ -898,6 +898,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
   const [preview, setPreview] = useState<{ id: string; src: string; title: string; caption: string } | null>(null);
   const [promptEditor, setPromptEditor] = useState<{ optionId: string; index: number; draft: string; direction: string } | null>(null);
   const [promptLoading, setPromptLoading] = useState(false);
+  const [direction, setDirection] = useState("");
   const update = (patch: Partial<ExpressState>) => setValue({ ...value, ...patch });
   const configured = Boolean(integrations.openrouter.configured && aiSettings.openrouterModel);
   const autoStarted = useRef(false);
@@ -939,12 +940,26 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [preview]);
 
-  const generate = async () => {
+  /**
+   * `steer` regenerates the three options from a user direction. It runs on the
+   * thinking model with high reasoning: following a brief across three coherent,
+   * genuinely distinct options is a reasoning task, not a rephrasing one.
+   */
+  const generate = async (steer = false) => {
     if (value.source.trim().length < 80) return showToast(lang === "fr" ? "Ajoutez au moins 80 caractères de contenu." : "Add at least 80 characters of content.", "warning");
     if (!configured) return showToast(lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle." : "Add your OpenRouter key and choose a model.", "warning");
+    const steering = steer ? direction.trim() : "";
+    if (steer && !steering) return showToast(lang === "fr" ? "Écrivez d’abord votre orientation." : "Write your direction first.", "warning");
     setLoading("package");
     try {
-      const response = await postJsonWithRetry("/api/openrouter-generate", { model: aiSettings.openrouterModel, language: lang, inputType: value.inputType, subject: value.subject, source: value.source, profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt, descriptionFooter: profile.descriptionFooter } });
+      const response = await postJsonWithRetry("/api/openrouter-generate", {
+        model: steering && aiSettings.writerModel ? aiSettings.writerModel : aiSettings.openrouterModel,
+        thinking: Boolean(steering && aiSettings.writerModel),
+        direction: steering,
+        previousTitles: steering ? (value.package?.options ?? []).map(option => option.title) : [],
+        language: lang, inputType: value.inputType, subject: value.subject, source: value.source,
+        profile: { channel: profile.channel, theme: profile.theme, audience: profile.audience, tone: profile.tone, thumbnailSystemPrompt: profile.thumbnailSystemPrompt, descriptionFooter: profile.descriptionFooter },
+      });
       const data = await response.json() as { result?: PackagingResult; error?: string; detail?: string };
       if (response.status === 401) throw new Error(lang === "fr" ? "Clé OpenRouter refusée. Testez-la dans le profil." : "OpenRouter rejected the key. Test it in your profile.");
       if (!response.ok || !data.result) throw new Error(data.detail || data.error || "generation_failed");
@@ -952,6 +967,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
       if (!Array.isArray(result.options) || result.options.length !== 3 || result.options.some(option => !Array.isArray(option.concepts) || option.concepts.length !== 3)) throw new Error("invalid_packaging_shape");
       update({ generated: true, thumbnailsGenerated: false, package: result, vidiqScores: {}, vidiqStatus: "idle", selected: { A: 0, B: 0, C: 0 } });
       setImages({});
+      if (steering) showToast(lang === "fr" ? "Trois nouvelles options selon votre orientation" : "Three new options following your direction");
     } catch (error) {
       showToast(error instanceof TypeError ? connectionLostMessage(lang) : lang === "fr" ? `OpenRouter : ${error instanceof Error ? error.message : "génération impossible"}` : `OpenRouter: ${error instanceof Error ? error.message : "generation failed"}`, "error");
     } finally { setLoading(null); }
@@ -1024,7 +1040,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
       <small>{configured ? (lang === "fr" ? `${aiSettings.openrouterModel} · à partir du script validé et de vos réponses, sans rien inventer` : `${aiSettings.openrouterModel} · from the approved script and your answers, inventing nothing`) : (lang === "fr" ? "Ajoutez votre clé OpenRouter et choisissez un modèle dans le Profil de chaîne." : "Add your OpenRouter key and choose a model in Channel profile.")}</small>
     </div>
     {configured
-      ? <button className="primary" onClick={generate} disabled={loading !== null}>{loading === "package" ? (lang === "fr" ? "Génération…" : "Generating…") : (lang === "fr" ? "Générer le packaging" : "Generate packaging")}</button>
+      ? <button className="primary" onClick={() => generate()} disabled={loading !== null}>{loading === "package" ? (lang === "fr" ? "Génération…" : "Generating…") : (lang === "fr" ? "Générer le packaging" : "Generate packaging")}</button>
       : <button onClick={openAiSettings}>{lang === "fr" ? "Configurer" : "Configure"} →</button>}
   </div> : <div className="express-page">
     <div className="express-hero"><div><span className="eyebrow">{lang === "fr" ? "VIDÉO DÉJÀ TOURNÉE" : "VIDEO ALREADY RECORDED"}</span><h1>{lang === "fr" ? "Du contenu au clic." : "From content to click."}</h1><p>{lang === "fr" ? "Collez votre script ou votre description. Le modèle OpenRouter choisi prépare le packaging, puis OpenAI génère les vraies miniatures." : "Paste your script or description. Your chosen OpenRouter model prepares the packaging, then OpenAI generates real thumbnails."}</p></div><div className="express-orbit"><span>3×3</span><small>{lang === "fr" ? "titres × concepts" : "titles × concepts"}</small></div></div>
@@ -1034,7 +1050,7 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
       <div className="source-toggle"><button className={value.inputType === "script" ? "active" : ""} onClick={() => update({ inputType: "script", generated: false })}>▤ {lang === "fr" ? "J’ai le script" : "I have the script"}<small>{lang === "fr" ? "Inclut 5 quiz" : "Includes 5 quizzes"}</small></button><button className={value.inputType === "description" ? "active" : ""} onClick={() => update({ inputType: "description", generated: false })}>≡ {lang === "fr" ? "J’ai la description" : "I have the description"}<small>{lang === "fr" ? "Packaging uniquement" : "Packaging only"}</small></button></div>
       <label><span>{lang === "fr" ? "Sujet de la vidéo (facultatif)" : "Video topic (optional)"}</span><input value={value.subject} onChange={event => update({ subject: event.target.value, generated: false })} placeholder={lang === "fr" ? "Le système le déduira du contenu si ce champ est vide" : "The system will infer it from the content if left blank"} /></label>
       <label><span>{value.inputType === "script" ? (lang === "fr" ? "Script complet" : "Full script") : (lang === "fr" ? "Description existante" : "Existing description")}</span><textarea value={value.source} onChange={event => update({ source: event.target.value, generated: false })} rows={13} placeholder={lang === "fr" ? "Collez ici le contenu exact de la vidéo…" : "Paste the exact video content here…"} /></label>
-      <div className="input-footer"><span>◆ {lang === "fr" ? "Les clés restent uniquement en mémoire pendant cette session" : "Keys remain only in memory for this session"}</span><button className="primary express-generate" onClick={generate} disabled={loading !== null || !configured}>{loading === "package" ? (lang === "fr" ? "Génération avec l’IA…" : "Generating with AI…") : (lang === "fr" ? "Générer le packaging" : "Generate packaging")} →</button></div>
+      <div className="input-footer"><span>◆ {lang === "fr" ? "Les clés restent uniquement en mémoire pendant cette session" : "Keys remain only in memory for this session"}</span><button className="primary express-generate" onClick={() => generate()} disabled={loading !== null || !configured}>{loading === "package" ? (lang === "fr" ? "Génération avec l’IA…" : "Generating with AI…") : (lang === "fr" ? "Générer le packaging" : "Generate packaging")} →</button></div>
     </section>
   </div>;
 
@@ -1048,9 +1064,21 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
   }, undefined);
   return <div className={`express-page results${embedded ? " embedded" : ""}`}>
     <div className="express-result-head"><div>{embedded
-      ? <button onClick={generate} disabled={loading !== null}>↻ {loading === "package" ? (lang === "fr" ? "Régénération…" : "Regenerating…") : (lang === "fr" ? "Régénérer le packaging" : "Regenerate packaging")}</button>
+      ? <button onClick={() => generate()} disabled={loading !== null}>↻ {loading === "package" ? (lang === "fr" ? "Régénération…" : "Regenerating…") : (lang === "fr" ? "Régénérer le packaging" : "Regenerate packaging")}</button>
       : <button onClick={() => update({ generated: false, thumbnailsGenerated: false })}>← {lang === "fr" ? "Modifier la source" : "Edit source"}</button>}<span className="eyebrow">{embedded ? (lang === "fr" ? "PACKAGING · ÉTAPE 7" : "PACKAGING · STEP 7") : (lang === "fr" ? "PACKAGING EXPRESS · IA" : "AI EXPRESS PACKAGING")}</span><h1>{pack.topic}</h1></div><div className="result-status"><span>✓</span><div><strong>{lang === "fr" ? "Généré par" : "Generated by"} {aiSettings.openrouterModel}</strong><small>{value.inputType === "script" ? "Script + quiz" : (lang === "fr" ? "Description seule" : "Description only")}</small></div></div></div>
     <section className="express-section"><div className="express-section-title"><span>01</span><div><h2>{lang === "fr" ? "Tests A/B/C" : "A/B/C tests"}</h2><p>{lang === "fr" ? "Choisissez un concept visuel pour chaque paire titre–description." : "Choose one visual concept for each title–description pair."}</p></div><button className={`vidiq-sync ${value.vidiqStatus || "idle"}`} onClick={() => syncVidiqScores(pack.options)} disabled={value.vidiqStatus === "loading"}>{value.vidiqStatus === "loading" ? (lang === "fr" ? "Synchronisation…" : "Syncing…") : (lang === "fr" ? "Synchroniser les scores vidIQ" : "Sync vidIQ scores")}</button></div>
+      <section className="ab-steer">
+        <div className="ab-steer-head"><span>✦</span><div><strong>{lang === "fr" ? "Orienter les trois options" : "Steer the three options"}</strong><small>{lang === "fr" ? "Donnez une direction éditoriale : l’IA regénère les trois titres, descriptions et concepts en la suivant, sans reproposer les titres actuels." : "Give an editorial direction: AI regenerates all three titles, descriptions and concepts to follow it, without repeating the current titles."}</small></div></div>
+        <div className="ab-steer-suggestions">{(lang === "fr"
+          ? ["Plus provocant", "Plus concret et chiffré", "Angle débutant", "Insister sur la gratuité", "Ton plus calme"]
+          : ["More provocative", "More concrete", "Beginner angle", "Stress that it is free", "Calmer tone"]
+        ).map(suggestion => <button key={suggestion} onClick={() => setDirection(suggestion)}>＋ {suggestion}</button>)}</div>
+        <textarea value={direction} rows={3} maxLength={2000} onChange={event => setDirection(event.target.value)} placeholder={lang === "fr" ? "Ex. Mets l’accent sur ce qui reste bloqué plutôt que sur la gratuité, et évite le mot « illimité » dans les titres…" : "E.g. Emphasise what stays locked rather than the free tier, and avoid the word “unlimited” in the titles…"} />
+        <div className="ab-steer-action">
+          <small>{aiSettings.writerModel ? (lang === "fr" ? `Régénération avec réflexion élevée · ${aiSettings.writerModel}` : `Regeneration with high reasoning · ${aiSettings.writerModel}`) : (lang === "fr" ? "Choisissez un modèle de scénarisation dans les réglages pour activer la réflexion élevée." : "Choose a long-form writing model in settings to enable high reasoning.")}</small>
+          <button className="primary" onClick={() => generate(true)} disabled={loading !== null || !direction.trim()}>{loading === "package" ? (lang === "fr" ? "Régénération…" : "Regenerating…") : `↻ ${lang === "fr" ? "Régénérer les 3 options" : "Regenerate the 3 options"}`}</button>
+        </div>
+      </section>
       <div className="ab-options">{pack.options.map(option => <article className="ab-option" key={option.id}><div className="ab-option-head"><span>OPTION {option.id}</span><small>{option.register}</small></div><div className={`vidiq-score ${value.vidiqScores?.[option.id] !== undefined ? "ready" : "pending"}`}><b>{value.vidiqScores?.[option.id] ?? "—"}</b><span>{value.vidiqScores?.[option.id] !== undefined ? "/100 · vidIQ" : (lang === "fr" ? "score vidIQ en attente" : "vidIQ score pending")}</span></div><h3>{option.title}</h3><p>{option.description}</p><div className="copy-row"><button onClick={() => copy(option.title)}>⧉ {lang === "fr" ? "Titre" : "Title"}</button><button onClick={() => copy(option.description)}>⧉ Description</button></div><div className="concept-list"><strong>{lang === "fr" ? "3 concepts de miniature" : "3 thumbnail concepts"}</strong>{option.concepts.map((concept, index) => { const editing = promptEditor?.optionId === option.id && promptEditor.index === index; return <div className={`concept-row ${value.selected[option.id] === index ? "selected" : ""}`} key={`${option.id}-${index}`}>
         <button className="concept-select" onClick={() => { update({ selected: { ...value.selected, [option.id]: index }, thumbnailsGenerated: false }); setImages({}); }}><span>{value.selected[option.id] === index ? "✓" : index + 1}</span><div><b>{concept.name}</b><small>{concept.prompt}</small></div></button>
         <button className="concept-edit" aria-label={lang === "fr" ? `Modifier le prompt du concept « ${concept.name} »` : `Edit the prompt of concept “${concept.name}”`} aria-expanded={editing} onClick={() => setPromptEditor(editing ? null : { optionId: option.id, index, draft: concept.prompt, direction: "" })}>✎</button>
