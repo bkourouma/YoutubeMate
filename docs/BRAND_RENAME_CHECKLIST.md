@@ -1,4 +1,4 @@
-# Brand rename — YoutubeMate → CreatorStudio
+# Brand rename — YoutubeMate → CreatorMate
 
 **Status: not cleared.** The code rename is done and reversible. The name itself has not
 been checked by anyone qualified to check it, and the sections below say so item by item.
@@ -14,29 +14,40 @@ confusable variant in its overall name:
 also has to be resolved before the OAuth consent screen is submitted for verification —
 Google reviews the application name at that point.
 
-## Confusion risk with the chosen name
+## Why not "CreatorStudio"
 
-"Creator Studio" is not distinctive. In August 2026 it is already in use by:
+That was the first candidate and it was dropped. "Creator Studio" is not distinctive: in
+August 2026 it is already used by Apple (<https://www.apple.com/apple-creator-studio/>),
+by Meta (<https://creatorstudio.facebook.com/install>), and colloquially for YouTube
+Studio — the exact association the rename exists to drop. It would have traded a guideline
+violation for a crowded name, with poor search ranking and a trademark search near-certain
+to surface prior rights.
 
-- Apple — <https://www.apple.com/apple-creator-studio/>
-- Meta — <https://creatorstudio.facebook.com/install>
-- and colloquially for YouTube Studio, which is the very association we are trying to drop.
+**CreatorMate** is materially more distinctive, and it keeps continuity with the former
+name, which matters for anyone who already knows the project.
 
-So the rename trades a guideline violation for a crowded name. That is an improvement, not
-a resolution. Expect poor search ranking on the product name alone, and expect a trademark
-search to surface prior rights. **A fallback to a more distinctive name must stay on the
-table** until a professional says otherwise; because every surface now reads from
-`app/config/product.ts`, that fallback is a one-line change plus the external rows below.
+## Still not cleared
+
+More distinctive is not the same as available. None of this has been checked:
+
+- trademark registers in the target territories;
+- the domain, the social handles, the npm name, the GitHub organisation;
+- how the name ranks in a search against existing products.
+
+Do not announce it publicly until those are done. If any of them fails, the fallback is a
+one-line change in `app/config/product.ts` plus the external rows below — an escape route
+this rename has now exercised once, from CreatorStudio to CreatorMate, with no source file
+outside that module touched.
 
 ## Matrix
 
 | Item | Current value | Target value | Owner | Status |
 |---|---|---|---|---|
-| Interface (sidebar, titles, alerts) | via `app/config/product.ts` | CreatorStudio | code | **done** — enforced by test |
-| HTML metadata / OpenGraph title | via `product.name` | CreatorStudio | code | **done** |
-| Word export header, footer, fallback | via `productName` | CreatorStudio | code | **done** |
-| OpenRouter `x-title` header | via `product.name` | CreatorStudio | code | **done** |
-| npm package name (private) | `creatorstudio` | `creatorstudio` | code | **done** — never published |
+| Interface (sidebar, titles, alerts) | via `app/config/product.ts` | CreatorMate | code | **done** — enforced by test |
+| HTML metadata / OpenGraph title | via `product.name` | CreatorMate | code | **done** |
+| Word export header, footer, fallback | via `productName` | CreatorMate | code | **done** |
+| OpenRouter `x-title` header | via `product.name` | CreatorMate | code | **done** |
+| npm package name (private) | `creatormate` | `creatormate` | code | **done** — never published |
 | Test guarding hard-coded names | present | present | code | **done** |
 | GitHub repository name | `bkourouma/YoutubeMate` | to decide | owner | **to do — external** |
 | Git remote + existing clone URLs | old name | new name + redirect | owner | **to do — external** |
@@ -46,7 +57,7 @@ table** until a professional says otherwise; because every surface now reads fro
 | Google Cloud project + OAuth client name | old name | new name | owner | **to do — external** |
 | OAuth consent screen (app name, logo, homepage, policy URLs) | old name | new name | owner | **to do — external** |
 | Published screenshots and demo video | old name visible | re-capture | owner | **to do** |
-| README (en + fr) | mixed | new name, historical note kept | code | **to do — this PR** |
+| README (en + fr) | CreatorMate | CreatorMate, historical note kept | code | **done** |
 | Legal notices, terms, privacy policy | none | to draft | owner | **to do** |
 | Trademark clearance in target territories | not done | cleared or fallback | professional | **to do — blocking** |
 | Domain / social handles / npm / GitHub org availability | not checked | checked | owner | **to do — blocking** |

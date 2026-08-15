@@ -2,20 +2,21 @@
  * One place that names the product.
  *
  * The app was called YoutubeMate. Google's branding guidelines say an application must
- * not carry "YouTube", "YT" or a variant in its overall name, so the product is being
- * renamed to CreatorStudio:
+ * not carry "YouTube", "YT" or a variant in its overall name, so it was renamed:
  *   https://developers.google.com/youtube/terms/branding-guidelines
  *
- * The name is NOT cleared yet — "Creator Studio" is already used by Apple, by Meta and
- * colloquially for YouTube Studio, so trademark, domain and search-confusion clearance
- * are still open. See docs/BRAND_RENAME_CHECKLIST.md. Routing every surface through this
- * module is what makes the next rename a one-line change instead of a hunt.
+ * "CreatorStudio" was considered first and dropped: Apple, Meta and YouTube Studio all
+ * use that phrase, so it would have traded a guideline violation for a crowded name.
+ * "CreatorMate" is more distinctive and keeps continuity with the former name, but it is
+ * NOT cleared — trademark, domain and handle checks are still open. See
+ * docs/BRAND_RENAME_CHECKLIST.md. Routing every surface through this module is what makes
+ * the next rename a one-line change instead of a hunt; it already survived one.
  *
  * References to YouTube that genuinely mean the platform, its API or its rules stay as
  * they are: renaming a third-party API would falsely imply it belongs to this product.
  */
 export const product = {
-  name: "CreatorStudio",
+  name: "CreatorMate",
   /** Shown under the wordmark in the sidebar. */
   tagline: "Creator workspace",
   shortDescription: {

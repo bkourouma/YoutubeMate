@@ -28,7 +28,7 @@ test("server-renders the YoutubeMate workspace with both pipelines named", async
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /aria-label="CreatorStudio"/i);
+  assert.match(html, /aria-label="CreatorMate"/i);
   assert.match(html, /Script Studio/);
   assert.match(html, /Shorts Studio/);
   assert.match(html, /Hook &amp; intro/);
@@ -1134,7 +1134,7 @@ test("arrives at step 7 with the publishing checklist already ticked", async () 
 
 test("names the product from one module, and only from there", async () => {
   const config = await readFile(new URL("../app/config/product.ts", import.meta.url), "utf8");
-  assert.match(config, /name: "CreatorStudio"/);
+  assert.match(config, /name: "CreatorMate"/);
   // Google's branding guidelines forbid "YouTube" or a variant in an application's
   // overall name: https://developers.google.com/youtube/terms/branding-guidelines
   // Only the values matter: the doc comment and `formerName` are meant to record that the
@@ -1158,10 +1158,10 @@ test("names the product from one module, and only from there", async () => {
 
   // Rendered output carries the new name, and the package is renamed without publishing.
   const html = await (await render()).text();
-  assert.match(html, /CreatorStudio/);
+  assert.match(html, /CreatorMate/);
   assert.doesNotMatch(html, /YoutubeMate/);
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.name, "creatorstudio");
+  assert.equal(packageJson.name, "creatormate");
   assert.notEqual(packageJson.private, false, "the package must not become publishable by this rename");
 
   // References to YouTube that mean the platform, its API or its rules must survive:
@@ -1421,4 +1421,27 @@ test("holds the Descript contract: one composition per short, source untouched, 
   assert.match(upload, /item\.name === title/);
   // Nothing in either module writes to the console, where a token would end up.
   for (const source of [descript, upload]) assert.doesNotMatch(source, /console\.(log|error|warn)/);
+});
+
+test("states the licence it is actually under", async () => {
+  const [licence, readmeEn, readmeFr, contributing] = await Promise.all([
+    readFile(new URL("../LICENSE", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../README.fr.md", import.meta.url), "utf8"),
+    readFile(new URL("../CONTRIBUTING.md", import.meta.url), "utf8"),
+  ]);
+  // A public repository with no LICENSE grants nobody anything, whatever it looks like.
+  assert.match(licence, /GNU AFFERO GENERAL PUBLIC LICENSE/);
+  assert.match(licence, /Version 3, 19 November 2007/);
+  // The network clause is the whole reason for AGPL over GPL here.
+  assert.match(licence, /interacting with it remotely through a computer network/);
+  assert.ok(licence.split("\n").length > 600, "the licence text looks truncated");
+  for (const [name, readme] of [["en", readmeEn], ["fr", readmeFr]]) {
+    assert.match(readme, /AGPL-3\.0-or-later/, `README.${name} does not state the licence`);
+    assert.doesNotMatch(readme, /no LICENSE file yet|pas encore de fichier LICENSE/, `README.${name} still says the licence is missing`);
+  }
+  // The contribution agreement is still open, and merging before settling it cannot be
+  // undone — so the file has to say so rather than invite pull requests.
+  assert.match(contributing, /CLA or a DCO/);
+  assert.match(contributing, /no external contribution is being merged until it is settled/);
 });

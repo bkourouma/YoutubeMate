@@ -1,13 +1,19 @@
-# Licensing decision — open, and blocking
+# Licensing decision — settled: AGPL-3.0
 
-**There is no `LICENSE` file in this repository.** That is not an oversight, and it is not
-neutral: without one, the code is under exclusive copyright. Nobody may legally use,
-modify or redistribute it, whatever the repository being public implies. Every day it
-stays this way, someone may read the code, assume otherwise, and build on it.
+> **Decided on 2026-08-15 by the copyright holder: AGPL-3.0-or-later.** `LICENSE` now
+> contains the full text. The reasoning below is kept because it explains what the choice
+> commits the project to — in particular the contribution question, which is still open.
+>
+> **Still to decide, before the first external contribution is merged: CLA or DCO.** See
+> "Consequences to accept" below. A DCO is lighter but forecloses the separate commercial
+> licence; a CLA preserves it and deters casual contributors. Retrofitting either one means
+> contacting every past contributor, and one unreachable person blocks relicensing for good.
 
-**This decision belongs to the copyright holder and to nobody else.** No licence has been
-added by this pull request. What follows is a recommendation with its reasoning, so the
-decision can be made quickly rather than deferred again.
+## The original analysis
+
+Before this decision there was no `LICENSE` file, which meant the code sat under
+exclusive copyright: nobody could legally use, modify or redistribute it, whatever the
+repository being public implied.
 
 ## The three realistic options
 
@@ -45,9 +51,10 @@ trademark clauses — which matters more than usual here, since the product name
 **not cleared** (see `BRAND_RENAME_CHECKLIST.md`). Apache-2.0's explicit statement that
 the licence grants no trademark rights is worth having while that is unresolved.
 
-## Recommendation
+## The choice made
 
-**AGPL-3.0, with a separate commercial licence available from the copyright holder.**
+**AGPL-3.0-or-later, with a separate commercial licence available from the copyright
+holder.**
 
 Dual licensing is the standard shape for open source plus hosted: AGPL for everyone,
 and a commercial licence for anyone who wants to build something proprietary on it. It
@@ -77,16 +84,14 @@ obligation falls on someone who *modifies* it and offers it as a service.
 from it. New versions may be relicensed; released ones stay available under the terms
 they carried.
 
-## What the owner has to do
+## What is left to do
 
-1. Choose. AGPL-3.0 is the recommendation; the reasoning above should make it a short
-   decision either way.
-2. Decide CLA or DCO **before** the first external contribution.
-3. Add `LICENSE` with the full text, and a short header note in `README.md` and
-   `README.fr.md`.
-4. Add a `NOTICE` or a licensing section if a commercial licence is offered, saying who
-   to contact.
-5. Only then present this repository as open source.
-
-Until step 3, the repository is public source, not open source, and should be described
-that way.
+1. ~~Choose.~~ Done: AGPL-3.0-or-later.
+2. ~~Add `LICENSE`.~~ Done, with the full text, and stated in both READMEs.
+3. **Decide CLA or DCO before merging the first external contribution.** Until that is
+   settled, do not merge one — accepting a contribution under an unclear arrangement is
+   the thing that cannot be undone later.
+4. Add a licensing section naming who to contact for a commercial licence, once there is
+   an address to name.
+5. Check the licences of existing dependencies for AGPL compatibility before the first
+   release.

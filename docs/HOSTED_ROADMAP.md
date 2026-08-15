@@ -9,7 +9,7 @@ Suggested labels: `priority:P0` `priority:P1` `priority:P2` `security` `oauth` `
 
 ---
 
-## P0-1 — Complete the CreatorStudio rename and clear the name
+## P0-1 — Complete the CreatorMate rename and clear the name
 
 `priority:P0` `documentation`
 **Depends on:** nothing. **Blocks:** P0-5, and every public communication.
@@ -27,17 +27,21 @@ applied by editing that one module.
 
 ---
 
-## P0-2 — Select and apply the open-source licence
+## P0-2 — Settle the contribution agreement (CLA or DCO)
 
 `priority:P0`
-**Depends on:** nothing. **Blocks:** any external contribution, any "open source" claim.
+**Blocks:** merging any external contribution.
 
-Without `LICENSE`, the code is under exclusive copyright. See `LICENSING_DECISION.md` —
-the recommendation is AGPL-3.0 with a separate commercial licence.
+**Done:** AGPL-3.0-or-later chosen and applied; `LICENSE` holds the full text; both READMEs
+state it.
 
-**Done when:** the owner has chosen; `LICENSE` contains the full text; CLA or DCO is
-decided and documented **before** the first external pull request is merged; dependency
-licences have been checked for compatibility; and both READMEs state the licence.
+**Still open:** CLA or DCO. A DCO is lighter but forecloses the separate commercial
+licence; a CLA preserves it and deters casual contributors. Neither can be applied
+retroactively — one unreachable past contributor blocks relicensing permanently.
+
+**Done when:** the choice is made and documented in `CONTRIBUTING.md`; the mechanism is
+enforced on pull requests; and dependency licences have been checked for AGPL
+compatibility before the first release.
 
 ---
 
@@ -47,8 +51,13 @@ licences have been checked for compatibility; and both READMEs state the licence
 **Depends on:** P0-2 (a provider choice may have licence implications).
 **Blocks:** P0-6, P1-1, P1-2, P1-3.
 
-`AUTH_MODE=hosted-session` exists and returns nothing. Pick a provider and implement that
-adapter. Do not widen trust in the proxy header to work around it.
+**Provider decided: Better Auth** — see `adr/0001-hosted-authentication-provider.md` for
+why, and for what the others cost. `AUTH_MODE=hosted-session` exists and returns nothing;
+implement that adapter. Do not widen trust in the proxy header to work around it.
+
+The risky part is not the sign-in screen: existing rows are keyed by the current identity
+header, so the cutover needs a mapping or a linking step before trusted-proxy mode is
+turned off. Done carelessly it orphans every encrypted API key and every YouTube grant.
 
 **Done when:** a session issued by the provider resolves to a stable user id; the
 trusted-proxy header is refused in that mode; `DEV_USER_ID` stays refused in production;

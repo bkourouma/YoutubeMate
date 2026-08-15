@@ -3,10 +3,13 @@
 Thank you for looking. This is a small project with one maintainer, so the most useful
 contribution is usually a precise bug report or a small, verified change.
 
-> **Licensing is not settled yet.** There is no `LICENSE` file, which means the code is
-> under exclusive copyright and no open-source rights are granted, whatever the repository
-> being public might suggest. See `docs/LICENSING_DECISION.md`. Until the owner picks a
-> licence, please do not build anything on top of this that depends on one.
+> **Licensed under AGPL-3.0-or-later.** Contributions are accepted under the same terms.
+>
+> **One thing is still open**: whether contributions require a CLA or a DCO sign-off. That
+> choice decides whether a separate commercial licence stays possible, and it cannot be
+> made retroactively — so **no external contribution is being merged until it is settled**.
+> Issues, bug reports and discussion are very welcome in the meantime. See
+> `docs/LICENSING_DECISION.md`.
 
 ## Setting up
 

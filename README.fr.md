@@ -1,4 +1,4 @@
-# CreatorStudio
+# CreatorMate
 
 *[English](README.md) · Français*
 
@@ -12,7 +12,7 @@ Un seul atelier pour deux formats YouTube, avec une base, un profil et un jeu de
 
 > **Anciennement YoutubeMate.** Les règles de marque de Google interdisent « YouTube » dans le nom d'une application : le produit est donc renommé. Le nouveau nom **n'est pas encore validé juridiquement** — voir [docs/BRAND_RENAME_CHECKLIST.md](docs/BRAND_RENAME_CHECKLIST.md).
 >
-> **Il n'y a pas encore de fichier LICENSE**, donc aucun droit open source n'est accordé malgré le caractère public de ce dépôt. Voir [docs/LICENSING_DECISION.md](docs/LICENSING_DECISION.md).
+> **Sous licence [AGPL-3.0-or-later](LICENSE).** Vous pouvez l'utiliser, le modifier et l'auto-héberger librement ; si vous proposez une version modifiée comme service en réseau, vos modifications doivent être publiées sous la même licence. Une licence commerciale distincte est disponible auprès du titulaire des droits — voir [docs/LICENSING_DECISION.md](docs/LICENSING_DECISION.md).
 >
 > **Il n'existe ni version hosted ni image Docker.** L'auto-hébergement est le seul moyen de l'utiliser aujourd'hui, en mono-locataire — voir [docs/HOSTED_READINESS.fr.md](docs/HOSTED_READINESS.fr.md).
 
@@ -52,8 +52,9 @@ Indisponible. Rien ne tourne, rien n'accepte d'inscription, rien n'est payable. 
 | [Sécurité](SECURITY.md) | Signalement privé, ce qui est protégé et ce qui ne l'est pas |
 | [Préparation hosted](docs/HOSTED_READINESS.fr.md) · [en](docs/HOSTED_READINESS.md) | Ce qui existe, ce qui n'existe pas |
 | [Feuille de route](docs/HOSTED_ROADMAP.md) | Backlog priorisé avec critères d'acceptation |
-| [Licence](docs/LICENSING_DECISION.md) | Pourquoi il n'y a pas encore de LICENSE |
+| [Licence](docs/LICENSING_DECISION.md) | Pourquoi AGPL-3.0, et ce que cela engage |
 | [Renommage](docs/BRAND_RENAME_CHECKLIST.md) | Ce qui est fait, ce que seul le propriétaire peut faire |
+| [Décisions](docs/adr/) | Registre des décisions d'architecture |
 
 <!-- Captures d'écran et démonstration à ajouter une fois le renommage appliqué aux
      captures. Aucun placeholder n'est committé : une capture fausse ou cassée est pire
