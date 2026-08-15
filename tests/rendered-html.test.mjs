@@ -876,3 +876,27 @@ test("asks for the headline without forbidding it in the same prompt", async () 
   assert.ok(composed.indexOf("headlineDirective") < composed.indexOf("presenterBrief"), "the presenter requirement must come last");
   assert.doesNotMatch(composed, /Add the exact large headline/);
 });
+
+test("makes the photograph the only source of the presenter's face", async () => {
+  const { presenterBrief } = await import("../app/server/image-framing.ts");
+  const [image] = await Promise.all([readFile(new URL("../app/api/openai-image/route.ts", import.meta.url), "utf8")]);
+  for (const pipeline of ["script", "shorts"]) {
+    const brief = presenterBrief(pipeline);
+    // The face came back generic because a written description — "a bald African man
+    // with thick-frame glasses" — is easier to satisfy than a photograph, and describes
+    // a type. The photograph has to outrank the words explicitly.
+    assert.match(brief, /ONLY source of their face/);
+    assert.match(brief, /wherever words and the photograph disagree, the photograph wins/);
+    assert.match(brief, /generic person who merely fits it/);
+    // Style references are past thumbnails: their people are rendered, not photographed.
+    assert.match(brief, /take no face, no person and no likeness from them/);
+    // The eyewear is the detail that gave the substitution away.
+    assert.match(brief, /same frame shape, same colour, same thickness/);
+  }
+  // gpt-image-1.5 defaults to low fidelity, which loses a face; gpt-image-2 is always
+  // high and rejects the parameter outright.
+  assert.match(image, /if \(model === "gpt-image-1\.5"\) form\.append\("input_fidelity", "high"\)/);
+  assert.doesNotMatch(image, /gpt-image-2"\)\s*form\.append\("input_fidelity"/);
+  // A real face to preserve buys fewer competing style images.
+  assert.match(image, /const styleBudget = presenterKey \? 2 : 4/);
+});

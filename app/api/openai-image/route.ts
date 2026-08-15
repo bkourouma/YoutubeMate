@@ -57,7 +57,12 @@ export async function POST(request: Request) {
   try {
     // The presenter photo travels as a reference image too, so the model can keep the
     // face faithful; it is listed first so it is the dominant human reference.
-    const requestedReferences = [...(presenterKey ? [presenterKey] : []), ...(body.referenceKeys ?? []).slice(0, 4)];
+    // Style references compete with the presenter photo for the face: they are past
+    // thumbnails, and the people in them are rendered, not photographed. The channel's
+    // visual language already travels in words through the editorial system prompt, so
+    // when a real face has to be preserved the image-side style budget is cut to two.
+    const styleBudget = presenterKey ? 2 : 4;
+    const requestedReferences = [...(presenterKey ? [presenterKey] : []), ...(body.referenceKeys ?? []).slice(0, styleBudget)];
     const size = framing.size;
     let response: Response;
     if (requestedReferences.length) {
@@ -77,6 +82,9 @@ export async function POST(request: Request) {
       form.append("size", size);
       form.append("quality", body.quality ?? "medium");
       form.append("output_format", framing.format);
+      // gpt-image-2 processes every input at high fidelity and rejects the parameter;
+      // gpt-image-1.5 defaults to low, which is what loses a face.
+      if (model === "gpt-image-1.5") form.append("input_fidelity", "high");
       for (const [index, object] of objects.entries()) {
         const typedObject = object!;
         const contentType = typedObject.httpMetadata?.contentType ?? "image/jpeg";
