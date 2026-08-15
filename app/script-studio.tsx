@@ -41,6 +41,8 @@ type Project = {
   bodySections?: BodySection[];
   // Step 7 packaging, persisted so revisiting the step never re-runs a paid generation.
   packaging?: ExpressState;
+  // Absent means "everything ticked"; only what the user unticks is written down.
+  publishChecklist?: Record<string, boolean>;
 };
 
 type ThumbnailConcept = { name: string; prompt: string };
@@ -287,6 +289,11 @@ function migrateProject(value: Partial<Project>, profile: Profile): Project {
     hookGeneratedByAi: value.hookGeneratedByAi,
     packageAnswers: { visual: value.packageAnswers?.visual ?? "", timecodes: value.packageAnswers?.timecodes ?? "", links: value.packageAnswers?.links ?? "" },
     packaging: value.packaging && typeof value.packaging === "object" ? value.packaging : undefined,
+    // This migration is an allow-list: a field missing from it is silently dropped on
+    // every load, however carefully it was written on save.
+    publishChecklist: value.publishChecklist && typeof value.publishChecklist === "object" && !Array.isArray(value.publishChecklist)
+      ? Object.fromEntries(Object.entries(value.publishChecklist).filter(([, checked]) => typeof checked === "boolean"))
+      : undefined,
     bodySections: Array.isArray(value.bodySections) && value.bodySections.length
       ? value.bodySections.filter(section => section && typeof section.id === "string" && typeof section.script === "string" && typeof section.transition === "string").map(section => ({ id: section.id, script: section.script, transition: section.transition }))
       : undefined,
@@ -1212,9 +1219,37 @@ function StudioPackaging({ project, profile, updateProject, lang, t, copy, showT
         </div></>
       : <><div className="ab-note">ⓘ {lang === "fr" ? "YouTube ne teste qu’une variable à la fois : titres OU miniatures." : "YouTube tests one variable at a time: titles OR thumbnails."}</div>
         <ExpressPackagingAI value={packagingValue} setValue={setPackagingValue} profile={profile} lang={lang} copy={copy} showToast={showToast} aiSettings={aiSettings} integrations={integrations} referenceThumbnails={referenceThumbnails} presenterKey={presenterKey} openAiSettings={openAiSettings} projectRef={{ projectId: project.id, projectTitle: project.title }} autoStart={complete} embedded />
-        <div className="publish-section"><h3>{lang === "fr" ? "Checklist de publication" : "Publishing checklist"}</h3>{["Titre", "Description & liens", "Miniature à 120 px", "Chapitres", "Sous-titres", "Commentaire épinglé", "Test A/B", "CTR à 24–48 h"].map(x => <label key={x}><input type="checkbox" />{x}</label>)}</div></>}
+        <div className="publish-section"><h3>{lang === "fr" ? "Checklist de publication" : "Publishing checklist"}</h3>
+          {PUBLISH_CHECKLIST.map(item => {
+            // Ticked on arrival: by step 7 the studio has produced all of this. The
+            // checklist is here to be unticked when something is missing, not to make
+            // the user re-confirm work the app just did — and an untick is remembered.
+            const checked = project.publishChecklist?.[item.key] ?? true;
+            return <label key={item.key}>
+              <input type="checkbox" checked={checked} onChange={event => updateProject({ publishChecklist: { ...checklistState(project), [item.key]: event.target.checked } })} />
+              {item[lang]}
+            </label>;
+          })}
+        </div></>}
   </>;
 }
+// Stable keys, so an untick survives a label change or a switch of interface language.
+const PUBLISH_CHECKLIST = [
+  { key: "title", fr: "Titre", en: "Title" },
+  { key: "description", fr: "Description & liens", en: "Description & links" },
+  { key: "thumbnail", fr: "Miniature à 120 px", en: "Thumbnail at 120 px" },
+  { key: "chapters", fr: "Chapitres", en: "Chapters" },
+  { key: "subtitles", fr: "Sous-titres", en: "Subtitles" },
+  { key: "pinned", fr: "Commentaire épinglé", en: "Pinned comment" },
+  { key: "abtest", fr: "Test A/B", en: "A/B test" },
+  { key: "ctr", fr: "CTR à 24–48 h", en: "CTR at 24–48 h" },
+] as const;
+
+/** Every item ticked unless the project says otherwise. */
+function checklistState(project: Pick<Project, "publishChecklist">) {
+  return Object.fromEntries(PUBLISH_CHECKLIST.map(item => [item.key, project.publishChecklist?.[item.key] ?? true]));
+}
+
 function Question({ n, label, value, set, placeholder, help, optional }: { n: string; label: string; value: string; set: (v: string) => void; placeholder: string; help?: string; optional?: string }) { return <label className="question"><span>{n}</span><div className="question-label"><strong>{label}{optional && <i>{optional}</i>}</strong>{help && <small>{help}</small>}</div><textarea value={value} onChange={e => set(e.target.value)} placeholder={placeholder} rows={3} /></label>; }
 
 function Projects({ projects, activeId, lang, t, open, create }: { projects: Project[]; activeId: string; lang: Lang; t: (typeof labels)[Lang]; open: (id: string) => void; create: () => void }) { return <div className="page-view"><div className="page-title"><div><span className="eyebrow">{t.overview}</span><h1>{t.projects}</h1><p>{lang === "fr" ? "Toutes vos vidéos, de l’idée à la publication." : "All your videos, from idea to publication."}</p></div><button className="primary" onClick={create}>＋ {t.newVideo}</button></div><div className="stats"><div><strong>{projects.length}</strong><span>{lang === "fr" ? "projets actifs" : "active projects"}</span></div><div><strong>{projects.filter(p => p.completed.includes(7)).length}</strong><span>{lang === "fr" ? "prêts à publier" : "ready to publish"}</span></div><div><strong>{projects.filter(p => p.status.includes("cours") || p.status.includes("progress")).length}</strong><span>{lang === "fr" ? "scripts en cours" : "scripts in progress"}</span></div></div><div className="project-table"><div className="table-head"><span>{t.project}</span><span>{t.status}</span><span>{t.updated}</span><span /></div>{projects.map(p => <button key={p.id} onClick={() => open(p.id)} className={p.id === activeId ? "current" : ""}><span className="project-name"><i>{p.title.charAt(0)}</i><span><strong>{p.title}</strong><small>{p.subject}</small></span></span><span><b className="status-pill">{p.status}</b></span><span>{p.updated}</span><span>→</span></button>)}</div></div>; }

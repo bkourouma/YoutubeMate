@@ -1101,3 +1101,32 @@ test("keeps the credits ledger per user and per project", { concurrency: false }
   assert.match(studio, /view === "usage" && <CreditsUsage/);
   assert.match(studio, /usage: "Credits Usage"/);
 });
+
+test("arrives at step 7 with the publishing checklist already ticked", async () => {
+  const studio = await readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8");
+  // The boxes were bare inputs: unticked on arrival, and their state lived nowhere, so
+  // an untick vanished on the next reload.
+  assert.doesNotMatch(studio, /"Titre", "Description & liens"/);
+  assert.doesNotMatch(studio, /<input type="checkbox" \/>/);
+  // Ticked unless the project says otherwise, and an untick is written down.
+  assert.match(studio, /project\.publishChecklist\?\.\[item\.key\] \?\? true/);
+  assert.match(studio, /updateProject\(\{ publishChecklist:/);
+  assert.match(studio, /publishChecklist\?: Record<string, boolean>;/);
+  // Stable keys and both languages: the labels used to be French even in English.
+  for (const [key, en] of [["title", "Title"], ["description", "Description & links"], ["thumbnail", "Thumbnail at 120 px"],
+    ["chapters", "Chapters"], ["subtitles", "Subtitles"], ["pinned", "Pinned comment"], ["abtest", "A/B test"], ["ctr", "CTR at 24–48 h"]]) {
+    assert.match(studio, new RegExp(`key: "${key}"`), `the checklist lost the ${key} item`);
+    assert.ok(studio.includes(`en: "${en}"`), `${key} has no English label`);
+  }
+  // migrateProject rebuilds every project from an allow-list, so a field missing from it
+  // is wiped on each load no matter how carefully it was saved. That is what swallowed
+  // the first version of this checklist.
+  const migrate = studio.slice(studio.indexOf("function migrateProject"));
+  const base = migrate.slice(migrate.indexOf("const base: Project"), migrate.indexOf("return base;"));
+  const projectType = studio.slice(studio.indexOf("type Project = {"), studio.indexOf("type ThumbnailConcept"));
+  const optional = [...projectType.matchAll(/(\w+)\?:/g)].map(match => match[1]);
+  for (const field of optional) {
+    assert.ok(base.includes(`${field}:`), `migrateProject drops the optional field "${field}" on every load`);
+  }
+  assert.ok(optional.includes("publishChecklist"), "the checklist field left the Project type");
+});
