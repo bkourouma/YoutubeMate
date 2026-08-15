@@ -1,4 +1,4 @@
-# YoutubeMate — Différenciateurs et proposition de valeur
+# CreatorMate — Différenciateurs et proposition de valeur
 
 Les intégrations Descript et YouTube doivent apparaître parmi les tout premiers différenciateurs. Elles permettent un véritable flux de production, et pas seulement un export de métadonnées.
 
@@ -25,4 +25,4 @@ Ces capacités sont visibles directement dans le workflow [`shorts-studio.tsx`](
 
 > Un cockpit de production éditoriale qui relie l’IA, Descript et YouTube : il transforme une vidéo longue en Shorts, crée directement les compositions dans Descript, puis prépare et pilote leur publication sur YouTube avec validation humaine.
 
-Le différenciateur central du produit est que YoutubeMate ne génère pas seulement des recommandations ou des fichiers à copier-coller. Il agit directement dans la chaîne de production du créateur.
+Le différenciateur central du produit est que CreatorMate ne génère pas seulement des recommandations ou des fichiers à copier-coller. Il agit directement dans la chaîne de production du créateur.

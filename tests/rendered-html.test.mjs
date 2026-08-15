@@ -1146,6 +1146,19 @@ test("names the product from one module, and only from there", async () => {
   assert.match(config, /github\.com\/bkourouma\/CreatorMate/);
   // The former name survives only as a labelled historical fact.
   assert.match(config, /formerName: "YoutubeMate"/);
+  // ...and nowhere else as the product's name. Renaming a file is not renaming what is
+  // inside it: docs/CreatorMate_differenciateurs.md kept calling the product YoutubeMate
+  // in its title and its closing line.
+  const docs = await readdir(new URL("../docs", import.meta.url));
+  for (const name of docs.filter(file => file.endsWith(".md") && !file.startsWith("Prompt_"))) {
+    const text = await readFile(new URL(`../docs/${name}`, import.meta.url), "utf8");
+    const historical = /BRAND_RENAME|formerly|anciennement|former name|used to be called|was called|is now|renamed/i;
+    for (const [index, line] of text.split("\n").entries()) {
+      if (!line.includes("YoutubeMate")) continue;
+      assert.ok(historical.test(line) || historical.test(name) || line.includes(`bkourouma/YoutubeMate`),
+        `docs/${name}:${index + 1} still calls the product YoutubeMate outside a historical note`);
+    }
+  }
   // Google's branding guidelines forbid "YouTube" or a variant in an application's
   // overall name: https://developers.google.com/youtube/terms/branding-guidelines
   // Only the values matter: the doc comment and `formerName` are meant to record that the
