@@ -1,8 +1,10 @@
 import { env } from "cloudflare:workers";
 import { requireUserId, unauthorizedResponse } from "../../server/identity";
 
-const MAX_FILE_SIZE = 4 * 1024 * 1024;
-const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_FILE_SIZE = 8 * 1024 * 1024;
+// The client re-encodes to JPEG before uploading, so these are the fallback formats
+// for browsers where that conversion is unavailable.
+const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
 
 function bucket() {
   const runtime = env as unknown as { BUCKET?: R2Bucket };

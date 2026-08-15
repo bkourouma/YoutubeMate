@@ -1093,10 +1093,16 @@ function formatTokenPrice(perToken: number) {
   return `$${perMillion < 0.01 ? perMillion.toFixed(4) : perMillion < 1 ? perMillion.toFixed(2) : perMillion.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
-async function optimizeReferenceImage(file: File) {
+/**
+ * Re-encodes an image in the browser before upload: a phone photo is routinely 5-10 MB
+ * and often in a format the server refuses, while the model only ever needs a modest
+ * JPEG. Returns the original file when the browser cannot decode it, so the server
+ * still gets to produce a precise error rather than a silent failure.
+ */
+async function optimizeImage(file: File, maxWidth: number, maxHeight: number) {
   try {
     const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / bitmap.width, 900 / bitmap.height);
+    const scale = Math.min(1, maxWidth / bitmap.width, maxHeight / bitmap.height);
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
@@ -1129,17 +1135,30 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
     if (!file) return;
     setPresenterUploading(true);
     try {
+      // Shrink and re-encode first: phone photos are large and often HEIC, and the
+      // model only needs a portrait a fraction of that size.
+      const prepared = await optimizeImage(file, 1400, 1400);
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", prepared);
       const response = await fetch("/api/presenter-photo", { method: "POST", body: form });
-      const data = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(data.error || "presenter_upload_failed");
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(data.error || `http_${response.status}`);
       reloadPresenter();
       showToast(lang === "fr" ? "Photo enregistrée" : "Photo saved");
     } catch (error) {
-      showToast(error instanceof Error && error.message === "invalid_presenter_file"
-        ? (lang === "fr" ? "Format ou taille refusés (JPEG, PNG ou WebP, 4 Mo max)." : "Format or size rejected (JPEG, PNG or WebP, 4 MB max).")
-        : (lang === "fr" ? "Envoi de la photo impossible." : "Could not upload the photo."), "error");
+      const code = error instanceof TypeError ? "network" : error instanceof Error ? error.message : "unknown";
+      // Say what actually failed: a generic message left no way to act.
+      const messages: Record<string, string> = {
+        network: connectionLostMessage(lang),
+        invalid_presenter_file: lang === "fr"
+          ? `Votre navigateur n’a pas pu convertir ce fichier (${file.type || "format inconnu"}). Les photos iPhone en HEIC sont souvent en cause : exportez-la en JPEG, ou faites une capture d’écran de la photo.`
+          : `Your browser could not convert this file (${file.type || "unknown format"}). iPhone HEIC photos are a common cause: export it as JPEG, or take a screenshot of it.`,
+        presenter_file_required: lang === "fr" ? "Aucun fichier reçu. Réessayez." : "No file received. Try again.",
+        presenter_storage_unavailable: lang === "fr" ? "Le stockage des images est indisponible sur ce déploiement." : "Image storage is unavailable on this deployment.",
+        presenter_upload_failed: lang === "fr" ? "Le stockage a refusé l’image. Réessayez dans un instant." : "Storage refused the image. Try again shortly.",
+        authentication_required: lang === "fr" ? "Session non authentifiée. Rechargez la page." : "Unauthenticated session. Reload the page.",
+      };
+      showToast(messages[code] ?? (lang === "fr" ? `Envoi impossible (${code}).` : `Upload failed (${code}).`), "error");
     } finally { setPresenterUploading(false); }
   };
   const removePresenter = async () => {
@@ -1200,7 +1219,7 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
     setUploading(true);
     try {
       const form = new FormData();
-      for (const file of Array.from(files).slice(0, available)) form.append("files", await optimizeReferenceImage(file));
+      for (const file of Array.from(files).slice(0, available)) form.append("files", await optimizeImage(file, 1600, 900));
       const response = await fetch("/api/reference-thumbnails", { method: "POST", body: form });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || "upload_failed");
@@ -1277,10 +1296,10 @@ function ProfilePageAI({ profile, setProfile, lang, t, aiSettings, setAiSettings
           : <div className="presenter-empty">{lang === "fr" ? "Aucune photo" : "No photo"}</div>}
         <div className="presenter-actions">
           <label className="presenter-upload">{presenterUploading ? (lang === "fr" ? "Envoi…" : "Uploading…") : presenterPhoto ? (lang === "fr" ? "Remplacer la photo" : "Replace photo") : (lang === "fr" ? "Ajouter ma photo" : "Add my photo")}
-            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={presenterUploading} onChange={event => uploadPresenter(event.target.files)} />
+            <input type="file" accept="image/*" disabled={presenterUploading} onChange={event => uploadPresenter(event.target.files)} />
           </label>
           {presenterPhoto && <button type="button" className="danger" onClick={removePresenter} disabled={presenterUploading}>{lang === "fr" ? "Retirer" : "Remove"}</button>}
-          <p>{lang === "fr" ? "JPEG, PNG ou WebP, 4 Mo maximum. Un portrait cadré poitrine, sur fond simple, donne les meilleurs résultats. La photo n’est jamais publiée : elle sert uniquement de référence au modèle." : "JPEG, PNG or WebP, 4 MB maximum. A chest-up portrait on a plain background works best. The photo is never published: it only guides the model."}</p>
+          <p>{lang === "fr" ? "La photo est réduite et convertie automatiquement dans votre navigateur. Un portrait cadré poitrine, sur fond simple, donne les meilleurs résultats. La photo n’est jamais publiée : elle sert uniquement de référence au modèle." : "The photo is resized and converted automatically in your browser. A chest-up portrait on a plain background works best. The photo is never published: it only guides the model."}</p>
         </div>
       </div>
     </section>

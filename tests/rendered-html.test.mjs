@@ -491,6 +491,27 @@ test("ports the Shorts data routes with identity, caps and its cue logic intact"
   assert.match(projects, /eq\(shortsProjects\.userId, userId\)/);
 });
 
+test("prepares the presenter photo in the browser and names what failed", async () => {
+  const [studio, route] = await Promise.all([
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/presenter-photo/route.ts", import.meta.url), "utf8"),
+  ]);
+  // A phone photo is routinely 5-10 MB; uploading it raw failed against any sane cap.
+  assert.match(studio, /const prepared = await optimizeImage\(file, 1400, 1400\)/);
+  assert.match(studio, /async function optimizeImage\(file: File, maxWidth: number, maxHeight: number\)/);
+  // Reference thumbnails share the same helper rather than a second copy.
+  assert.match(studio, /optimizeImage\(file, 1600, 900\)/);
+  assert.doesNotMatch(studio, /optimizeReferenceImage/);
+  // Every failure mode gets its own message: one generic string left nothing to act on.
+  for (const code of ["invalid_presenter_file", "presenter_storage_unavailable", "authentication_required", "network"]) {
+    assert.ok(studio.includes(code), `the upload must name the ${code} case`);
+  }
+  assert.match(studio, /HEIC/);
+  // Parsing the body must not throw before the status is checked.
+  assert.match(studio, /response\.json\(\)\.catch\(\(\) => \(\{\}\)\)/);
+  assert.match(route, /MAX_FILE_SIZE = 8 \* 1024 \* 1024/);
+});
+
 test("packages already-edited shorts without a transcript", async () => {
   const [express, route, studio] = await Promise.all([
     readFile(new URL("../app/shorts-express.tsx", import.meta.url), "utf8"),
