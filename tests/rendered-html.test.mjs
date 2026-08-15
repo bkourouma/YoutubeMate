@@ -27,7 +27,7 @@ test("server-renders the YoutubeMate workspace with both pipelines named", async
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /aria-label="YoutubeMate"/i);
+  assert.match(html, /aria-label="CreatorStudio"/i);
   assert.match(html, /Script Studio/);
   assert.match(html, /Shorts Studio/);
   assert.match(html, /Hook &amp; intro/);
@@ -47,7 +47,7 @@ test("removes disposable starter assets and keeps product metadata", async () =>
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /<ScriptStudio \/>/);
-  assert.match(layout, /YoutubeMate — de l’idée à la publication/);
+  assert.ok(layout.includes("${product.name} — de l’idée à la publication"), "the OpenGraph title no longer reads the product name from config");
   assert.match(layout, /\/og\.png/);
   assert.doesNotMatch(layout, /next\/font/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
@@ -960,7 +960,7 @@ test("exports the whole project as a Word document built for copy-paste", async 
   // Branding: the logo is embedded, and the document still works without one.
   assert.match(word, /ImageRun/);
   assert.match(word, /if \(input\.logo\)/);
-  assert.match(word, /input\.company \|\| "YoutubeMate"/);
+  assert.match(word, /input\.company \|\| productName/);
   // Word embeds PNG and JPEG only; refusing anything else at upload beats a document
   // that silently comes out logo-less.
   assert.match(logoRoute, /new Set\(\["image\/png", "image\/jpeg"\]\)/);
@@ -1129,4 +1129,103 @@ test("arrives at step 7 with the publishing checklist already ticked", async () 
     assert.ok(base.includes(`${field}:`), `migrateProject drops the optional field "${field}" on every load`);
   }
   assert.ok(optional.includes("publishChecklist"), "the checklist field left the Project type");
+});
+
+test("names the product from one module, and only from there", async () => {
+  const config = await readFile(new URL("../app/config/product.ts", import.meta.url), "utf8");
+  assert.match(config, /name: "CreatorStudio"/);
+  // Google's branding guidelines forbid "YouTube" or a variant in an application's
+  // overall name: https://developers.google.com/youtube/terms/branding-guidelines
+  // Only the values matter: the doc comment and `formerName` are meant to record that the
+  // product used to be called something else, and the repository URL still is.
+  const values = config.slice(config.indexOf("export const product")).replace(/formerName:[^\n]*/, "").replace(/repositoryUrl:[^\n]*/, "").replace(/supportUrl:[^\n]*/, "");
+  assert.doesNotMatch(values, /YoutubeMate/);
+  assert.match(config, /formerName: "YoutubeMate"/, "the former name must stay recorded for migration notes");
+
+  const files = await readdir(new URL("../app/", import.meta.url), { recursive: true });
+  const sources = files.filter(name => /\.tsx?$/.test(String(name)));
+  const offenders = [];
+  const posix = name => String(name).split("\\").join("/");
+  for (const name of sources) {
+    if (posix(name) === "config/product.ts") continue;
+    const source = await readFile(new URL(`../app/${posix(name)}`, import.meta.url), "utf8");
+    // Hard-coded product names are what makes a rename a hunt. The config module is the
+    // single exception, and it keeps the former name for migration notes.
+    if (/YoutubeMate|YouTubeMate/.test(source)) offenders.push(posix(name));
+  }
+  assert.deepEqual(offenders, [], `these files still hard-code the old product name: ${offenders.join(", ")}`);
+
+  // Rendered output carries the new name, and the package is renamed without publishing.
+  const html = await (await render()).text();
+  assert.match(html, /CreatorStudio/);
+  assert.doesNotMatch(html, /YoutubeMate/);
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.name, "creatorstudio");
+  assert.notEqual(packageJson.private, false, "the package must not become publishable by this rename");
+
+  // References to YouTube that mean the platform, its API or its rules must survive:
+  // renaming a third-party API would imply it belongs to this product.
+  const studio = await readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8");
+  assert.match(studio, /YouTube/);
+  const checklist = await readFile(new URL("../docs/BRAND_RENAME_CHECKLIST.md", import.meta.url), "utf8");
+  // The rename is not "done" until things outside this repository are done too.
+  for (const external of ["GitHub", "OAuth", "domain", "npm"]) {
+    assert.ok(checklist.includes(external), `the checklist does not mention ${external}`);
+  }
+});
+
+test("decides where an identity may come from, and refuses every other source", { concurrency: false }, async () => {
+  const { resolveAuthMode, providerFor, devUserId, TRUSTED_PROXY_HEADER } = await import("../app/server/auth.ts");
+  const saved = { mode: process.env.AUTH_MODE, dev: process.env.DEV_USER_ID, node: process.env.NODE_ENV };
+  const headersWith = value => ({ get: name => (name === TRUSTED_PROXY_HEADER ? value : null) });
+  try {
+    // Default: the contract the app is deployed under today. This refactor must not take
+    // the running deployment down.
+    delete process.env.AUTH_MODE;
+    assert.equal(resolveAuthMode(), "trusted-proxy-header");
+    assert.equal(providerFor("trusted-proxy-header").identify(headersWith("someone")), "someone");
+    // An unrecognised value must not silently widen trust either way.
+    process.env.AUTH_MODE = "whatever";
+    assert.equal(resolveAuthMode(), "trusted-proxy-header");
+
+    // Outside that mode the header is attacker-controlled, so it is ignored — this is the
+    // whole point: the same code deployed elsewhere used to accept it from anyone.
+    process.env.NODE_ENV = "development";
+    process.env.DEV_USER_ID = "local-dev";
+    assert.equal(providerFor("dev").identify(headersWith("attacker")), "local-dev");
+    // No hosted provider has been chosen, so that mode hands out nothing at all.
+    assert.equal(providerFor("hosted-session").identify(headersWith("attacker")), null);
+
+    // DEV_USER_ID stands in for the entire authentication layer. In production it would
+    // give every anonymous visitor the same identity — and that identity's stored keys.
+    process.env.NODE_ENV = "production";
+    assert.equal(devUserId(), null, "DEV_USER_ID must be refused in production");
+    assert.equal(providerFor("dev").identify(headersWith("attacker")), null);
+    process.env.NODE_ENV = "development";
+    assert.equal(devUserId(), "local-dev");
+  } finally {
+    if (saved.mode === undefined) delete process.env.AUTH_MODE; else process.env.AUTH_MODE = saved.mode;
+    if (saved.dev === undefined) delete process.env.DEV_USER_ID; else process.env.DEV_USER_ID = saved.dev;
+    if (saved.node === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = saved.node;
+  }
+
+  // End to end: a public request carrying no identity gets nothing from a paid route.
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("auth-boundary-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  for (const path of ["/api/openrouter-generate", "/api/openai-image", "/api/shorts-analyze"]) {
+    const response = await worker.fetch(new Request(`http://localhost${path}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+    }), env, ctx);
+    assert.equal(response.status, 401, `${path} answered ${response.status} without an identity`);
+    assert.equal((await response.json()).error, "authentication_required");
+  }
+
+  const identity = await readFile(new URL("../app/server/identity.ts", import.meta.url), "utf8");
+  // The header must be read through the provider, never directly, or the boundary leaks.
+  assert.doesNotMatch(identity, /"oai-authenticated-user-id"/);
+  assert.match(identity, /providerFor\(mode\)\.identify/);
+  assert.doesNotMatch(identity, /process\.env\.DEV_USER_ID/);
 });
