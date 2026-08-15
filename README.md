@@ -2,7 +2,7 @@
 
 *English · [Français](README.fr.md)*
 
-[![CI](https://github.com/bkourouma/YoutubeMate/actions/workflows/ci.yml/badge.svg)](https://github.com/bkourouma/YoutubeMate/actions/workflows/ci.yml)
+[![CI](https://github.com/bkourouma/CreatorMate/actions/workflows/ci.yml/badge.svg)](https://github.com/bkourouma/CreatorMate/actions/workflows/ci.yml)
 
 **An editorial production cockpit that acts inside your production chain.** It turns a long video into Shorts, creates the compositions directly in Descript, then prepares and drives their upload to YouTube — with a human check at every step that matters.
 

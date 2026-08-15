@@ -1135,6 +1135,17 @@ test("arrives at step 7 with the publishing checklist already ticked", async () 
 test("names the product from one module, and only from there", async () => {
   const config = await readFile(new URL("../app/config/product.ts", import.meta.url), "utf8");
   assert.match(config, /name: "CreatorMate"/);
+  // The repository was renamed, so GitHub redirects the old URL — but that redirect dies
+  // the day anyone creates a repository under the old name, including by accident. Every
+  // link has to name the current one.
+  const repoLinks = await Promise.all(["../app/config/product.ts", "../README.md", "../README.fr.md",
+    "../SECURITY.md", "../.github/ISSUE_TEMPLATE/config.yml"].map(file => readFile(new URL(file, import.meta.url), "utf8")));
+  for (const [index, file] of repoLinks.entries()) {
+    assert.doesNotMatch(file, /github\.com\/bkourouma\/YoutubeMate/, `file ${index} still links to the old repository name`);
+  }
+  assert.match(config, /github\.com\/bkourouma\/CreatorMate/);
+  // The former name survives only as a labelled historical fact.
+  assert.match(config, /formerName: "YoutubeMate"/);
   // Google's branding guidelines forbid "YouTube" or a variant in an application's
   // overall name: https://developers.google.com/youtube/terms/branding-guidelines
   // Only the values matter: the doc comment and `formerName` are meant to record that the

@@ -19,7 +19,7 @@ Les intégrations Descript et YouTube doivent apparaître parmi les tout premier
 - **Français et anglais dès le départ.**
 - **Export de livrables réellement réutilisables** : Word, CSV, SRT, ZIP CapCut, fiches de publication et ressources de production.
 
-Ces capacités sont visibles directement dans le workflow [`shorts-studio.tsx`](https://github.com/bkourouma/YoutubeMate/blob/main/app/shorts-studio.tsx), notamment le chargement des projets Descript, la création des compositions et la publication individuelle vers YouTube.
+Ces capacités sont visibles directement dans le workflow [`shorts-studio.tsx`](https://github.com/bkourouma/CreatorMate/blob/main/app/shorts-studio.tsx), notamment le chargement des projets Descript, la création des compositions et la publication individuelle vers YouTube.
 
 ## Proposition de valeur
 

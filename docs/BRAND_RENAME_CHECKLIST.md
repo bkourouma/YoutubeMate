@@ -49,10 +49,11 @@ outside that module touched.
 | OpenRouter `x-title` header | via `product.name` | CreatorMate | code | **done** |
 | npm package name (private) | `creatormate` | `creatormate` | code | **done** — never published |
 | Test guarding hard-coded names | present | present | code | **done** |
-| GitHub repository name | `bkourouma/YoutubeMate` | to decide | owner | **to do — external** |
-| Git remote + existing clone URLs | old name | new name + redirect | owner | **to do — external** |
-| `product.repositoryUrl` / `supportUrl` | old repo URL | new repo URL | owner | **blocked** by the row above |
+| GitHub repository name | `bkourouma/CreatorMate` | `bkourouma/CreatorMate` | owner | **done — external** |
+| Git remote + existing clone URLs | new name | new name + redirect | owner | **done** — GitHub redirects the old URL; see the warning below |
+| `product.repositoryUrl` / `supportUrl` | new repo URL | new repo URL | code | **done** |
 | Domain name | none | to acquire | owner | **to do — external** |
+| Security advisory URL | new repo URL | new repo URL | code | **done** |
 | Support / security contact address | placeholder in `SECURITY.md` | real address | owner | **to do — external** |
 | Google Cloud project + OAuth client name | old name | new name | owner | **to do — external** |
 | OAuth consent screen (app name, logo, homepage, policy URLs) | old name | new name | owner | **to do — external** |
@@ -62,13 +63,28 @@ outside that module touched.
 | Trademark clearance in target territories | not done | cleared or fallback | professional | **to do — blocking** |
 | Domain / social handles / npm / GitHub org availability | not checked | checked | owner | **to do — blocking** |
 
-## What a code change cannot do
+## The repository rename is done
 
-Renaming the GitHub repository, acquiring the domain, setting up redirects and updating
-the Google OAuth client are **operations outside this repository**. Editing a string here
-does not perform them, and must not be reported as if it had. Until the repository is
-renamed, `product.repositoryUrl` deliberately still points at the old URL: a link that
-404s is worse than a link that names the past.
+`bkourouma/YoutubeMate` is now `bkourouma/CreatorMate`, and every URL in the codebase was
+repointed with it — `product.repositoryUrl`, `supportUrl`, the CI badges, the security
+advisory link and the issue-template links.
+
+**GitHub redirects the old URL, but that redirect is not a permanent address.** It stops
+the moment anyone creates a repository named `bkourouma/YoutubeMate` — including you, by
+accident. Anything still pointing at the old name breaks that day, silently. That is why
+the links were rewritten rather than left to the redirect.
+
+Existing local clones keep the old remote until each one runs:
+
+```bash
+git remote set-url origin https://github.com/bkourouma/CreatorMate.git
+```
+
+## What a code change still cannot do
+
+Acquiring the domain, taking the social handles and updating the Google OAuth client are
+**operations outside this repository**. Editing a string here does not perform them, and
+must not be reported as if it had.
 
 Existing identifiers stay as they are on purpose:
 

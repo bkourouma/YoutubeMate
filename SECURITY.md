@@ -4,7 +4,7 @@
 
 **Do not open a public issue.** Use GitHub's private advisory form:
 
-<https://github.com/bkourouma/YoutubeMate/security/advisories/new>
+<https://github.com/bkourouma/CreatorMate/security/advisories/new>
 
 > **Owner to complete:** add a monitored security contact address here, and in
 > `app/config/product.ts`. Until then the advisory form above is the only private channel.

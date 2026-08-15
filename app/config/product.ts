@@ -23,10 +23,9 @@ export const product = {
     en: "An editorial production cockpit: research, long-form script, Shorts, packaging, Descript and YouTube — with a human check at each step that matters.",
     fr: "Un cockpit de production éditoriale : recherche, script long, Shorts, packaging, Descript et YouTube — avec une validation humaine à chaque étape qui compte.",
   },
-  repositoryUrl: "https://github.com/bkourouma/YoutubeMate",
-  /** Filled in by the owner; see docs/BRAND_RENAME_CHECKLIST.md. */
-  supportUrl: "https://github.com/bkourouma/YoutubeMate/issues",
-  /** The repository still carries the old name until the GitHub rename is performed. */
+  repositoryUrl: "https://github.com/bkourouma/CreatorMate",
+  supportUrl: "https://github.com/bkourouma/CreatorMate/issues",
+  /** Kept so migration notes and release notes can say what the product used to be called. */
   formerName: "YoutubeMate",
 } as const;
 
