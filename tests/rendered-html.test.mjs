@@ -34,7 +34,7 @@ test("server-renders the YoutubeMate workspace with both pipelines named", async
   assert.match(html, /Recherche &amp; angle/);
   assert.match(html, /Validation des chapitres/);
   assert.match(html, /Packaging/);
-  assert.match(html, /Packaging express/);
+  assert.match(html, /Package vidéo/);
   assert.match(html, /Garde-fous actifs/);
   assert.match(html, /28<!-- --> \/ 40/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
@@ -519,8 +519,10 @@ test("packages already-edited shorts without a transcript", async () => {
     readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
   ]);
   // Two express entries, each naming its format so they cannot be confused.
-  assert.match(studio, /Packaging express · 16:9/);
-  assert.match(studio, /Publication express · Shorts/);
+  assert.match(studio, /Package vidéo/);
+  assert.match(studio, /hintExpress: "Vidéo longue déjà tournée"/);
+  assert.match(studio, /Package Short/);
+  assert.match(studio, /hintShortsExpress: "Short déjà monté"/);
   assert.match(studio, /<ShortsExpress lang=\{lang\}/);
   // Bulk runs sequentially: ten parallel calls would spike the provider rate limit.
   assert.match(express, /for \(const \[index, title\] of titles\.entries\(\)\)/);
