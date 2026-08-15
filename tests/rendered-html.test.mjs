@@ -9,6 +9,7 @@ const TEST_USER = "test-user";
 process.env.ADMIN_USER_ID ??= TEST_USER;
 process.env.OPENROUTER_API_KEY ??= "test-openrouter-key";
 process.env.OPENAI_API_KEY ??= "test-openai-key";
+process.env.DESCRIPT_API_TOKEN ??= "test-descript-token";
 const signedIn = { "content-type": "application/json", "oai-authenticated-user-id": TEST_USER };
 
 async function render() {
@@ -1262,4 +1263,162 @@ test("gives the YouTube grant back on disconnect, and drops a dead refresh token
   // The scope stays minimal: uploading is all this product does with the account.
   assert.match(youtube, /youtube\.upload/);
   assert.doesNotMatch(youtube, /youtube\.force-ssl|youtubepartner|youtube\.readonly/);
+});
+
+test("holds the Descript contract: one composition per short, source untouched, no token leak", { concurrency: false }, async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("descript-contract-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const call = (path, init) => worker.fetch(new Request(`http://localhost${path}`, init), env, ctx);
+
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  const upstream = (handler) => {
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("descriptapi.com") || url.includes("googleapis.com")) {
+        seen.push({ url, method: init?.method ?? "GET", headers: init?.headers ?? {}, body: init?.body });
+        const answer = handler(url, init);
+        if (answer) return answer;
+      }
+      return originalFetch(input, init);
+    };
+  };
+
+  try {
+    // Listing projects.
+    upstream(url => url.includes("/v1/projects?") ? Response.json({ projects: [{ id: "proj-1", name: "Luna" }, { id: "proj-2", name: "WhatsApp" }] }) : null);
+    const list = await call("/api/shorts-descript", { headers: signedIn });
+    assert.equal(list.status, 200);
+    assert.equal((await list.json()).projects.length, 2);
+    // The token travels in a header, never in the URL, where every proxy would log it.
+    const listed = seen.find(entry => entry.url.includes("/v1/projects?"));
+    assert.doesNotMatch(listed.url, /test-descript-token/);
+
+    // A projectId is validated before it can reshape a URL.
+    seen.length = 0;
+    for (const bad of ["../../admin", "proj 1", "proj/1", "a".repeat(65), ""]) {
+      const response = await call("/api/shorts-descript", {
+        method: "POST", headers: signedIn,
+        body: JSON.stringify({ action: "create_compositions", projectId: bad, shorts: [{ title: "T", sequences: [] }] }),
+      });
+      assert.equal(response.status, 400, `projectId "${bad}" was not rejected`);
+      assert.equal((await response.json()).error, "invalid_project_id");
+    }
+    assert.deepEqual(seen, [], "a rejected projectId must never reach Descript");
+
+    // Creating one composition per short.
+    seen.length = 0;
+    upstream(url => {
+      if (url.includes("/v1/agent/models")) return Response.json({ models: [{ id: "m1", name: "fast", cost_tier: "low" }] });
+      if (url.includes("/v1/projects/")) return Response.json({ id: "proj-1", medias: [] });
+      if (url.includes("/agent")) return Response.json({ job_id: "job-1", job_state: "queued" });
+      return null;
+    });
+    const shorts = [
+      // Non-consecutive ranges: the gap between them must not be included.
+      { title: "Luna est gratuit", durationMinutes: 2, sequences: [{ startTime: "00:12", endTime: "00:48" }, { startTime: "03:10", endTime: "03:52" }] },
+      { title: "Ce qui reste bloque", durationMinutes: 1, sequences: [{ startTime: "05:00", endTime: "05:40" }] },
+    ];
+    const created = await call("/api/shorts-descript", {
+      method: "POST", headers: signedIn,
+      body: JSON.stringify({ action: "create_compositions", projectId: "proj-1", includeCtaVideo: false, shorts }),
+    });
+    assert.equal(created.status, 200);
+    assert.equal((await created.json()).job_id, "job-1");
+
+    const agentCall = seen.find(entry => entry.url.includes("/agent") && entry.method === "POST");
+    assert.ok(agentCall, "no agent request was made");
+    const prompt = JSON.parse(String(agentCall.body)).prompt ?? String(agentCall.body);
+    // One composition per short, and the source explicitly protected: the difference
+    // between adding to a project and destroying the user's own edit.
+    assert.match(prompt, /exactement 2 nouvelles compositions/);
+    assert.ok(prompt.includes("sans alt"), "the prompt no longer protects the source composition");
+    // Named with the selected titles, which is what the upload matches on later.
+    for (const short of shorts) assert.ok(prompt.includes(short.title), `the prompt lost the title "${short.title}"`);
+    // Every range travels, in order, with the gaps excluded.
+    for (const time of ["00:12", "00:48", "03:10", "03:52", "05:00", "05:40"]) assert.ok(prompt.includes(time), `timecode ${time} was dropped`);
+    assert.ok(prompt.includes("intervalles"), "the instruction to skip the gaps is gone");
+    // The CTA was not asked for, so it must not be mentioned.
+    assert.doesNotMatch(prompt, /SHORT CTA/);
+    // The token is in the header, not in the body or the URL.
+    assert.doesNotMatch(String(agentCall.body), /test-descript-token/);
+    assert.doesNotMatch(agentCall.url, /test-descript-token/);
+
+    // The CTA is opt-in. The project already holds the clip, which is the second-run
+    // case and also proves the media is never imported — or paid for — twice.
+    seen.length = 0;
+    upstream(url => {
+      if (url.includes("/v1/agent/models")) return Response.json({ models: [{ id: "m1", name: "fast", cost_tier: "low" }] });
+      if (url.includes("/v1/projects/")) return Response.json({ id: "proj-1", media_files: { "SHORT CTA.mp4": {} } });
+      if (url.includes("/agent")) return Response.json({ job_id: "job-2", job_state: "queued" });
+      return null;
+    });
+    // The CTA clip is fetched by Descript from a URL we hand it, so that URL must come
+    // from configuration and never from the request's own Host header.
+    const savedOrigin = process.env.PUBLIC_APP_ORIGIN;
+    delete process.env.PUBLIC_APP_ORIGIN;
+    const noOrigin = await call("/api/shorts-descript", {
+      method: "POST", headers: signedIn,
+      body: JSON.stringify({ action: "create_compositions", projectId: "proj-1", includeCtaVideo: true, shorts }),
+    });
+    assert.equal(noOrigin.status, 503);
+    assert.equal((await noOrigin.json()).error, "public_origin_not_configured");
+
+    process.env.PUBLIC_APP_ORIGIN = "https://studio.example";
+    const withCta = await call("/api/shorts-descript", {
+      method: "POST", headers: signedIn,
+      body: JSON.stringify({ action: "create_compositions", projectId: "proj-1", includeCtaVideo: true, shorts }),
+    });
+    if (savedOrigin === undefined) delete process.env.PUBLIC_APP_ORIGIN; else process.env.PUBLIC_APP_ORIGIN = savedOrigin;
+    assert.equal(withCta.status, 200);
+    const ctaPrompt = JSON.parse(String(seen.find(entry => entry.url.includes("/agent") && entry.method === "POST")?.body ?? "{}")).prompt ?? "";
+    assert.match(ctaPrompt, /SHORT CTA/);
+
+    // Uploading establishes both credentials before touching anything, so a missing
+    // YouTube connection cannot leave a half-rendered composition behind. This harness
+    // has no D1 binding and therefore no stored YouTube grant, which is exactly the
+    // state being asserted here.
+    seen.length = 0;
+    upstream(url => {
+      if (url.includes("descriptapi.com/v1/projects/")) return Response.json({ id: "proj-1", compositions: [{ id: "c1", name: "Un autre nom" }] });
+      return null;
+    });
+    const upload = await call("/api/shorts-upload", {
+      method: "POST", headers: signedIn,
+      body: JSON.stringify({ projectId: "proj-1", title: "Luna est gratuit", description: "d", tags: ["a"] }),
+    });
+    assert.ok([502, 503].includes(upload.status), `expected a closed failure, got ${upload.status}`);
+    const body = await upload.json();
+    assert.ok(["youtube_not_connected", "youtube_token_unavailable"].includes(body.error), `unexpected error ${body.error}`);
+    assert.deepEqual(seen, [], "no render may be requested before both credentials are held");
+    // Whatever the failure, no credential is echoed back to the caller.
+    assert.doesNotMatch(JSON.stringify(body), /test-descript-token|Bearer/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  // Contract properties that are structural rather than per-request.
+  const [descript, upload, poll] = await Promise.all([
+    readFile(new URL("../app/api/shorts-descript/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shorts-upload/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/poll.ts", import.meta.url), "utf8"),
+  ]);
+  // An identical request inside the window must not re-run a paid agent job, and the
+  // ledger is per user: without that, another account's job_id came back to poll.
+  assert.match(descript, /const DEDUPE_WINDOW_MS/);
+  assert.match(descript, /findRecentJob\(userId, key\)/);
+  assert.match(descript, /fingerprint\(\{ version: PROMPT_VERSION, projectId, includeCtaVideo, briefs \}\)/);
+  // Polling is bounded by wall-clock time and says so when it gives up.
+  assert.match(poll, /PollTimeoutError/);
+  assert.match(descript, /descript_timeout/);
+  // One short per upload request: the original looped over every short inside a single
+  // request, so a dropped connection lost every paid render.
+  assert.doesNotMatch(upload, /shorts\?:\s*Array/);
+  assert.match(upload, /privacyStatus: "private"/);
+  assert.match(upload, /item\.name === title/);
+  // Nothing in either module writes to the console, where a token would end up.
+  for (const source of [descript, upload]) assert.doesNotMatch(source, /console\.(log|error|warn)/);
 });
