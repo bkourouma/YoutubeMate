@@ -1,101 +1,103 @@
 # YoutubeMate
 
-Un seul atelier pour deux formats YouTube, avec une base, un profil et un jeu de clés.
+*English · [Français](README.fr.md)*
 
-## Les quatre entrées
+One workshop for two YouTube formats, with one database, one profile and one set of keys. The interface itself runs in French or English.
 
-Le menu ne classe pas par outil mais par **ce que vous avez déjà en main** : un sujet, une vidéo longue à découper, une vidéo déjà tournée, un short déjà monté. Chaque entrée porte un sous-titre qui dit à qui elle s'adresse, pour qu'aucun choix ne demande d'ouvrir l'écran pour comprendre.
+## The four entry points
 
-| Menu | Sous-titre | Vous avez… | Vous obtenez… |
+The menu is organised not by tool but by **what you already have in hand**: a subject, a long video to cut up, a video already recorded, a short already edited. Each entry carries a subtitle naming who it is for, so no choice requires opening the screen to understand it.
+
+| Menu | Subtitle | You have… | You get… |
 |---|---|---|---|
-| ✍ **Script Studio** | Écrire une vidéo longue | un sujet | un script complet + son packaging |
-| ✂ **Shorts Studio** | Découper une vidéo en Shorts | une vidéo longue | des shorts montés et publiés |
-| 🎬 **Package vidéo** | Vidéo longue déjà tournée | un script tourné | titres, description, tags, miniatures |
-| ⚡ **Package Short** | Short déjà monté | un ou plusieurs shorts | titres, descriptions, miniatures verticales |
-| ▤ **Mes projets** | | | l'historique, avec le compteur |
-| ◉ **Ma chaîne & réglages** | | | profil, clés, photo, ADN visuel |
+| ✍ **Script Studio** | Write a long video | a subject | a full script and its packaging |
+| ✂ **Shorts Studio** | Cut a video into Shorts | a long video | edited, published shorts |
+| 🎬 **Video package** | Long video already recorded | a recorded script | titles, description, tags, thumbnails |
+| ⚡ **Short package** | Short already edited | one or more shorts | titles, descriptions, vertical thumbnails |
+| ▤ **My projects** | | | the history, with its counter |
+| ◉ **My channel & settings** | | | profile, keys, photo, visual DNA |
 
-Les deux premières entrées **produisent la vidéo**, les deux suivantes **habillent une vidéo déjà faite**. « Package » les rapproche volontairement : c'est la même étape du métier, appliquée à deux formats.
+The first two entries **produce the video**; the next two **dress a video that already exists**. "Package" deliberately brings them together: it is the same step of the craft, applied to two formats.
 
-## Les parcours
+## The pipelines
 
-**Script Studio — 7 étapes.** Recherche & angle · Hook & intro · Validation des chapitres · Corps du script · Conclusion & CTA · Relecture finale · Packaging. Le corps est écrit **un chapitre à la fois** : chaque chapitre part en requête séparée et est enregistré dès son retour. Une coupure ne coûte que le chapitre en cours, et relancer reprend au premier manquant.
+**Script Studio — 7 steps.** Research & angle · Hook & intro · Chapter validation · Script body · Conclusion & CTA · Final review · Packaging. The body is written **one chapter at a time**: each chapter goes out as its own request and is saved the moment it returns. An interruption costs only the chapter in flight, and restarting resumes at the first missing one.
 
-**Shorts Studio — 4 étapes.** Source · Extraits · Titres · Fiches. À partir d'une transcription, l'IA découpe des extraits autonomes avec leurs timecodes source, propose des titres notés, puis les descriptions, tags et concepts de miniature. Deux routes de production ensuite, au choix :
+**Shorts Studio — 4 stages.** Source · Excerpts · Titles · Metadata. From a transcript, the AI cuts self-contained excerpts with their source timecodes, proposes scored titles, then the descriptions, tags and thumbnail concepts. Two production routes follow, your choice:
 
-- **Descript** — création des compositions puis envoi vers YouTube, **une vidéo à la fois**, avec un bouton *Tester avec 1 vidéo* avant de lancer la série. La correspondance se fait par nom de composition : renommer dans Descript casse le lien, et le message d'erreur le dit.
-- **Kit CapCut** — CapCut n'expose aucune connexion publique permettant de construire une timeline. Le kit remplace cette étape : un ZIP contenant le plan de montage en CSV (chaque ligne = une séquence à couper), le texte de chaque short, les sous-titres SRT, la fiche de publication, la vidéo CTA optionnelle et un mode d'emploi. Les horaires estimés — issus d'une transcription sans horodatage — sont signalés comme tels.
+- **Descript** — build the compositions, then upload to YouTube **one video at a time**, with a *Test with 1 video* button before committing to the batch. Matching is by composition name: renaming inside Descript breaks the link, and the error message says so.
+- **CapCut kit** — CapCut exposes no public API for building a timeline. The kit replaces that step: a ZIP holding the edit plan as CSV (one row per sequence to cut), each short's text, SRT subtitles, the publishing sheet, an optional CTA video and a read-me. Timings marked as estimated — derived from a transcript without timestamps — are flagged as such.
 
-**Package vidéo.** Trois vérifications obligatoires, pré-remplies depuis votre profil et votre script (les timecodes de chapitres sont calculés à partir du script réel) ; le concept visuel est facultatif, l'IA en propose sinon. Puis le vrai moteur de packaging démarre seul.
+**Video package.** Three mandatory checks, pre-filled from your profile and your script (chapter timecodes are computed from the real script); the visual concept is optional, and the AI proposes one otherwise. Then the real packaging engine starts on its own.
 
-**Package Short.** Un short à la fois, ou jusqu'à **10 titres collés d'un coup** — en mode bulk le meilleur titre est retenu automatiquement.
+**Short package.** One short at a time, or up to **10 titles pasted at once** — in bulk mode the best title is selected automatically.
 
-## Le packaging : A/B/C, et comment l'orienter
+## Packaging: A/B/C, and how to steer it
 
-Chaque packaging produit **trois options complètes** — titre, description, concepts de miniature — pensées pour un test A/B YouTube (qui ne teste qu'une variable à la fois : titres **ou** miniatures).
+Every packaging run produces **three complete options** — title, description, thumbnail concepts — built for a YouTube A/B test (which only ever tests one variable at a time: titles **or** thumbnails).
 
-Un champ **« Orienter les trois options »** est posé au-dessus. Vous y écrivez la direction éditoriale voulue, ou partez d'une suggestion (*Plus provocant*, *Plus concret et chiffré*, *Angle débutant*, *Insister sur la gratuité*, *Ton plus calme*), et les trois options sont réécrites pour la suivre.
+A **"Steer the three options"** field sits above them. Write the editorial direction you want, or start from a suggestion (*More provocative*, *More concrete*, *Beginner angle*, *Stress that it is free*, *Calmer tone*), and all three options are rewritten to follow it.
 
-Deux détails font la différence entre une orientation suivie et une variante déguisée :
+Two details separate a direction that is actually followed from a variant in disguise:
 
-- **Les titres refusés partent avec la demande.** Sans cela un modèle renvoie des reformulations très proches de ce que vous venez d'écarter. Il lui est explicitement demandé de ne pas les reproposer.
-- **Une régénération orientée passe sur le modèle de rédaction**, avec réflexion élevée et température abaissée. Tenir un cahier des charges sur trois options cohérentes *et réellement distinctes* est un travail de raisonnement, pas de reformulation. La première génération reste sur le modèle rapide : le surcoût n'arrive que quand il achète quelque chose, et le bloc annonce quel modèle sera utilisé.
+- **The rejected titles travel with the request.** Without them a model returns rephrasings very close to what you just discarded. It is explicitly told not to offer them again.
+- **A steered regeneration switches to the writing model**, with high reasoning effort and a lowered temperature. Holding a brief across three coherent *and genuinely distinct* options is a reasoning task, not a rephrasing one. The first generation stays on the fast model: the cost only rises when it buys something, and the block states which model will be used.
 
-## Les miniatures
+## Thumbnails
 
-**Les concepts sont gratuits, l'image est payante.** L'IA propose trois concepts par option ; une seule image est produite, après votre choix.
+**Concepts are free, the image is not.** The AI proposes three concepts per option; a single image is produced, after you choose.
 
-- **Prompt modifiable.** Le prompt de chaque concept s'édite à la main, ou se réécrit par l'IA à partir d'une consigne (« fond plus sombre, gros plan sur le téléphone »).
-- **Aperçu sans téléchargement.** Un clic ouvre la miniature en grand ; le téléchargement reste un geste séparé.
-- **Format respecté.** Les dimensions sont transposées selon le pipeline : paysage pour le long, portrait pour les shorts — jamais une image 16:9 recadrée en 9:16.
-- **Votre photo.** Si une photo de présentateur est enregistrée, elle est envoyée avec la demande et l'instruction d'identité prime sur le reste du prompt : le visage doit être **le vôtre**, pas une interprétation. Les miniatures de référence servent au style récurrent de la chaîne, jamais à recopier une composition.
+- **Editable prompt.** Each concept's prompt can be edited by hand, or rewritten by the AI from an instruction ("darker background, close-up on the phone").
+- **View without downloading.** One click opens the thumbnail full size; downloading stays a separate gesture.
+- **Format respected.** Dimensions are transposed per pipeline: landscape for long form, portrait for shorts — never a 16:9 image cropped to 9:16.
+- **Your photo.** If a presenter photo is saved, it is sent with the request and the identity instruction overrides the rest of the prompt: the face must be **yours**, not an interpretation. Reference thumbnails serve the channel's recurring style, never to copy one composition.
 
-## Ma chaîne & réglages
+## My channel & settings
 
-Un seul écran pour les deux pipelines : **Clés & connexions** (OpenRouter, OpenAI, Descript, YouTube, modèles et qualité d'image) · **Votre photo dans les miniatures** · **ADN visuel des miniatures** (le système éditorial, déduit de vos miniatures de référence et affinable par consigne) · le profil éditorial et le bloc automatique de description.
+One screen for both pipelines: **Keys & connections** (OpenRouter, OpenAI, Descript, YouTube, models and image quality) · **Your photo in thumbnails** · **Thumbnail visual DNA** (the editorial system, inferred from your reference thumbnails and refinable by instruction) · the editorial profile and the automatic description block.
 
-## Principes
+## Principles
 
-**Rien n'est inventé.** Les garde-fous interdisent les chiffres, sources et promesses absents du contexte fourni. Les textes fixes de la chaîne (présentation, lancement, clôture) sont reproduits mot pour mot. Les scores de titres sont annoncés comme des estimations éditoriales de l'IA, jamais comme des données vidIQ.
+**Nothing is invented.** The guardrails forbid figures, sources and promises absent from the supplied context. The channel's fixed copy (introduction, opening, closing) is reproduced word for word. Title scores are announced as the AI's editorial estimates, never as vidIQ data.
 
-**Rien n'est perdu.** Chaque génération longue avance par morceaux et persiste au fur et à mesure : un chapitre, un short, un envoi. Les requêtes réessaient d'elles-mêmes avant d'abandonner. Ce que vous tapez l'emporte toujours sur ce que le serveur renvoie : une réponse tardive ne peut pas écraser un projet commencé entre-temps, et un échec d'enregistrement est annoncé au lieu d'être avalé.
+**Nothing is lost.** Every long generation advances in pieces and persists as it goes: one chapter, one short, one upload. Requests retry on their own before giving up. What you type always outranks what the server returns: a late response cannot overwrite a project started in the meantime, and a failed save is announced rather than swallowed.
 
-**Rien n'est dépensé sans intention.** Une seule image après votre choix, un modèle de raisonnement seulement quand il sert, et les résultats d'analyse, de titres et de fiches mis en cache par utilisateur.
+**Nothing is spent without intent.** A single image after your choice, a reasoning model only where it earns its place, and analysis, title and metadata results cached per user.
 
-**Rien n'est perdu de vue.** Les messages s'empilent en haut à droite au lieu de se remplacer, comptent les répétitions, se figent au survol et se ferment à l'échappement — une erreur ne peut plus être effacée par le succès suivant.
+**Nothing is lost from view.** Messages stack in the top-right corner instead of replacing one another, count their repetitions, freeze on hover and close on Escape — an error can no longer be wiped out by the success that follows it.
 
-## Démarrage
+## Getting started
 
 ```bash
 npm install
-cp .env.example .env      # puis remplir (voir ci-dessous)
+cp .env.example .env      # then fill it in (see below)
 npx vinext dev --port 3100
-node scripts/apply-local-migrations.mjs   # une fois, après le premier démarrage
+node scripts/apply-local-migrations.mjs   # once, after the first start
 ```
 
-Les scripts `npm run dev` / `build` utilisent une syntaxe POSIX qui échoue sous Windows ; appelez `npx vinext …` directement.
+The `npm run dev` / `build` scripts use POSIX syntax that fails on Windows; call `npx vinext …` directly.
 
-### Variables d'environnement
+### Environment variables
 
-| Variable | Rôle |
+| Variable | Role |
 |---|---|
-| `SETTINGS_ENCRYPTION_KEY` | **Obligatoire.** Chiffre les clés API en base (AES-GCM). Ne jamais la changer après coup : les clés deviendraient illisibles. |
-| `DEV_USER_ID` | Développement local uniquement — tient lieu d'en-tête d'identité. **Doit rester absente en production**, sinon tout visiteur anonyme hérite de cette identité et donc de vos clés. |
-| `ADMIN_USER_ID` | Facultatif. Autorise cet utilisateur à utiliser les clés serveur en secours. |
-| `ALLOWED_USER_IDS` | Facultatif. Restreint l'application à une liste d'identifiants. |
-| `PUBLIC_APP_ORIGIN` | Origine publique, obligatoire en production. Sert à l'URI de redirection OAuth et à l'URL du média envoyée à Descript, sans jamais faire confiance à l'en-tête `Host`. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Connexion YouTube. Client OAuth « Application Web », redirection `<origine>/api/youtube/callback`, API « YouTube Data v3 » activée. |
-| `VIDIQ_SCORE_ENDPOINT` | Relais vidIQ personnel pour les scores réels de titres. |
+| `SETTINGS_ENCRYPTION_KEY` | **Required.** Encrypts API keys at rest (AES-GCM). Never change it afterwards: the stored keys would become unreadable. |
+| `DEV_USER_ID` | Local development only — stands in for the identity header. **Must be absent in production**, otherwise every anonymous visitor inherits that identity, and therefore your keys. |
+| `ADMIN_USER_ID` | Optional. Lets this user fall back to the server-side keys. |
+| `ALLOWED_USER_IDS` | Optional. Restricts the application to a list of identifiers. |
+| `PUBLIC_APP_ORIGIN` | Public origin, required in production. Used for the OAuth redirect URI and for the media URL sent to Descript, without ever trusting the `Host` header. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | YouTube connection. OAuth "Web application" client, redirect `<origin>/api/youtube/callback`, "YouTube Data v3" API enabled. |
+| `VIDIQ_SCORE_ENDPOINT` | Personal vidIQ relay for real title scores. |
 
-**Les clés API (OpenRouter, OpenAI, Descript) ne se mettent pas dans `.env`** en usage normal : elles se saisissent dans l'application, sont testées auprès du fournisseur avant enregistrement, puis chiffrées côté serveur et liées à votre compte. Le navigateur n'en reçoit jamais que les quatre derniers caractères.
+**API keys (OpenRouter, OpenAI, Descript) do not belong in `.env`** in normal use: you enter them in the application, they are tested against the provider before being saved, then encrypted server-side and bound to your account. The browser only ever receives their last four characters.
 
-## Sécurité
+## Security
 
-Toute route qui dépense des crédits exige une identité authentifiée et résout la clé côté serveur ; aucune n'accepte de clé dans le corps de requête. Le refresh token YouTube est chiffré, propre à chaque utilisateur, et l'état OAuth est à usage unique et lié à celui qui a lancé le flux. Les identifiants de projet fournis par le client sont validés et encodés avant d'atteindre une URL Descript. Chaque appel sortant a une échéance.
+Every route that spends credits requires an authenticated identity and resolves the key server-side; none accepts a key in the request body. The YouTube refresh token is encrypted, per-user, and the OAuth state is single-use and bound to whoever started the flow. Client-supplied project identifiers are validated and encoded before reaching a Descript URL. Every outbound call has a deadline.
 
-Ces propriétés sont vérifiées par la suite de tests : une régression fait échouer le build.
+These properties are covered by the test suite: a regression fails the build.
 
-## Vérification
+## Verification
 
 ```bash
 npx tsc --noEmit
@@ -104,23 +106,23 @@ npx vinext build
 node --test tests/rendered-html.test.mjs
 ```
 
-La suite démarre le worker réel et vérifie le rendu, les contrats des routes et une série d'invariants — pas de clé dans un corps de requête, pas d'identité de repli partagée, styles Shorts confinés, ratios de miniatures corrects par format, réponse serveur tardive incapable d'écraser une édition locale.
+The suite boots the real worker and checks the rendering, the route contracts and a set of invariants — no key in a request body, no shared fallback identity, Shorts styles confined, thumbnail ratios correct per format, a late server response unable to overwrite a local edit.
 
 ## Architecture
 
 ```
 app/
-  script-studio.tsx     shell (nav, langue, alertes, persistance, profil) + pipeline long
-  shorts-studio.tsx     pipeline shorts, rendu sous .pipeline-shorts
-  shorts-express.tsx    packaging d'un short déjà monté, à l'unité ou en bulk
-  globals.css           styles partagés · shorts.css  styles shorts, tous portés
-  lib/capcut-kit.ts     construction du ZIP CapCut, chargée à la demande
+  script-studio.tsx     shell (nav, language, alerts, persistence, profile) + long-form pipeline
+  shorts-studio.tsx     shorts pipeline, rendered under .pipeline-shorts
+  shorts-express.tsx    packaging for an already-edited short, single or bulk
+  globals.css           shared styles · shorts.css  shorts styles, all scoped
+  lib/capcut-kit.ts     CapCut ZIP construction, loaded on demand
   server/               identity, secrets, http, poll, youtube, ai-cache, image-framing
-  api/                  routes ; les routes shorts-* sont préfixées
+  api/                  routes; the shorts-* routes are prefixed
 db/schema.ts            workspaces, integration_settings, ai_cache, shorts_projects,
                         descript_jobs, youtube_auth, oauth_states
 ```
 
-Les styles Shorts sont tous portés par `.pipeline-shorts` : les deux feuilles partagent dix-sept noms de classes, et cette contrainte — vérifiée par un test — rend la collision impossible plutôt qu'improbable.
+Every Shorts style is scoped by `.pipeline-shorts`: the two stylesheets share seventeen class names, and this constraint — enforced by a test — makes the collision impossible rather than unlikely.
 
-Aucun texte de l'interface ne descend sous 9 px : l'échelle typographique basse a été relevée de façon monotone, en gardant la hiérarchie relative intacte et en agrandissant les blocs à hauteur fixe, sinon un texte plus lisible n'aurait fait qu'afficher moins de lignes.
+No interface text falls below 9px: the low end of the type scale was raised monotonically, keeping the relative hierarchy intact and growing the fixed-height blocks with it, since otherwise more readable text would simply have shown fewer lines.
