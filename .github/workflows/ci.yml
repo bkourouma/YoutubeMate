@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A superseded run tells you nothing, and the queue is shared.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # No real credential ever reaches CI. These placeholders exercise the code paths
+      # that require a key to be present without granting access to anything.
+      SETTINGS_ENCRYPTION_KEY: ci-placeholder-key-not-a-real-secret
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          # Read from package.json engines, so the runtime cannot drift from the project.
+          node-version-file: package.json
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      # The suite loads dist/server/index.js, so it is built once here and reused by the
+      # test step rather than built twice.
+      - run: npm run build
+
+      - run: npm run test:only

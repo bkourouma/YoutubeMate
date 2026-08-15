@@ -1,0 +1,41 @@
+name: Integration problem
+description: OpenRouter, OpenAI, Descript or YouTube behaves unexpectedly.
+labels: ["integration"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Redact everything.** No key, token, refresh token, OAuth code, `Authorization`
+        header or signed URL — not even partially, beyond the last four characters. No
+        private transcript or channel content. `docs/DEBUGGING.md` has a redacted report
+        template; use it.
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Which integration
+      options: [OpenRouter, OpenAI, Descript, YouTube]
+    validations: { required: true }
+  - type: input
+    id: error
+    attributes:
+      label: Error code shown by the app
+      placeholder: "integration_not_configured, composition_not_found, youtube_not_connected…"
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected the integration to do
+    validations: { required: true }
+  - type: textarea
+    id: checks
+    attributes:
+      label: What you already checked
+      description: |
+        Key saved and tested in Settings? Provider status page? Quota or credits left?
+        Did it ever work, and what changed since?
+    validations: { required: true }
+  - type: input
+    id: model
+    attributes:
+      label: Model or Descript project involved
+      description: Model id, or the project name with anything private removed.
