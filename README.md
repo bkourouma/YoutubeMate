@@ -1,8 +1,62 @@
-# YoutubeMate
+# CreatorStudio
 
 *English · [Français](README.fr.md)*
 
+[![CI](https://github.com/bkourouma/YoutubeMate/actions/workflows/ci.yml/badge.svg)](https://github.com/bkourouma/YoutubeMate/actions/workflows/ci.yml)
+
+**An editorial production cockpit that acts inside your production chain.** It turns a long video into Shorts, creates the compositions directly in Descript, then prepares and drives their upload to YouTube — with a human check at every step that matters.
+
+It does not only recommend, and it does not only hand you files to copy and paste. That is the difference worth knowing before reading further.
+
 One workshop for two YouTube formats, with one database, one profile and one set of keys. The interface itself runs in French or English.
+
+> **Formerly YoutubeMate.** Google's branding guidelines forbid "YouTube" in an application's name, so the product is being renamed. The new name is **not legally cleared yet** — see [docs/BRAND_RENAME_CHECKLIST.md](docs/BRAND_RENAME_CHECKLIST.md).
+>
+> **There is no LICENSE file yet**, so no open-source rights are granted despite this repository being public. See [docs/LICENSING_DECISION.md](docs/LICENSING_DECISION.md).
+>
+> **There is no hosted version and no Docker image.** Self-hosting is the only way to run this today, and it is single-tenant — see [docs/HOSTED_READINESS.md](docs/HOSTED_READINESS.md).
+
+## The Descript → YouTube pipeline
+
+This is where other tools stop. From a transcript, the app cuts self-contained excerpts with their source timecodes, proposes scored titles, writes the descriptions, tags and thumbnail concepts — then:
+
+1. **reads your Descript projects** and lets you pick the source;
+2. **creates one vertical composition per Short inside it**, named with the title you chose, carrying the text, the source sequences, the timecodes, the target duration and optionally your CTA clip;
+3. **leaves the source composition untouched** — it adds, it never rewrites your edit;
+4. **uploads to YouTube one video at a time**, private, with title, description and tags, behind a *Test with 1 video* button that proves the path before you commit a batch;
+5. **resumes at the first missing Short** after an interruption, re-uploading nothing.
+
+Matching between a Short and its composition is by exact name, so renaming one in Descript surfaces as a clear error instead of publishing the wrong video.
+
+### Descript integration or CapCut kit
+
+Two routes, and the difference is not a preference:
+
+- **Descript** is a real integration. The app talks to your account, creates the compositions and drives the upload.
+- **CapCut** exposes no public API for building a timeline. The kit is not a lesser integration, it is the honest substitute: a ZIP holding the edit plan as CSV — one row per sequence to cut — each Short's text, SRT subtitles, the publishing sheet, the optional CTA clip and a read-me. Everything that can be prepared in advance is; the cutting is yours.
+
+## Community / self-hosted
+
+Everything here runs on your own Cloudflare account with your own API keys, encrypted at rest and bound to your identity. It is **single-tenant today**: one deployment, one owner. Read [docs/HOSTED_READINESS.md](docs/HOSTED_READINESS.md) before exposing it to anyone else — there is no verified authentication provider, no rate limiting and no account deletion workflow yet.
+
+## Hosted — planned
+
+Not available. Nothing is running, nothing accepts sign-ups, nothing can be paid for. The gap between here and there is written down in [docs/HOSTED_READINESS.md](docs/HOSTED_READINESS.md), with the backlog in [docs/HOSTED_ROADMAP.md](docs/HOSTED_ROADMAP.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [Debugging](docs/DEBUGGING.md) · [fr](docs/DEBUGGING.fr.md) | Setup, environment variables, symptom → fix, integration checks |
+| [Contributing](CONTRIBUTING.md) | Branches, migrations, testing integrations, rules for routes that spend money |
+| [Security](SECURITY.md) | Private reporting, what is protected and what is not |
+| [Hosted readiness](docs/HOSTED_READINESS.md) · [fr](docs/HOSTED_READINESS.fr.md) | What exists, what does not |
+| [Roadmap](docs/HOSTED_ROADMAP.md) | Prioritised backlog with acceptance criteria |
+| [Licensing](docs/LICENSING_DECISION.md) | Why there is no LICENSE yet |
+| [Brand rename](docs/BRAND_RENAME_CHECKLIST.md) | What is done, what only the owner can do |
+
+<!-- Screenshots and a demo recording go here once the rename reaches the interface
+     captures. No placeholder is committed: a fake or broken screenshot is worse than none. -->
 
 ## The four entry points
 

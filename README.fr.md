@@ -1,8 +1,63 @@
-# YoutubeMate
+# CreatorStudio
 
 *[English](README.md) · Français*
 
+[![CI](https://github.com/bkourouma/YoutubeMate/actions/workflows/ci.yml/badge.svg)](https://github.com/bkourouma/YoutubeMate/actions/workflows/ci.yml)
+
+**Un cockpit de production éditoriale qui agit dans votre chaîne de production.** Il transforme une vidéo longue en Shorts, crée directement les compositions dans Descript, puis prépare et pilote leur publication sur YouTube — avec une validation humaine à chaque étape qui compte.
+
+Il ne se contente pas de recommander, ni de vous remettre des fichiers à copier-coller. C'est la différence qu'il faut connaître avant de lire la suite.
+
 Un seul atelier pour deux formats YouTube, avec une base, un profil et un jeu de clés. L'interface elle-même s'utilise en français ou en anglais.
+
+> **Anciennement YoutubeMate.** Les règles de marque de Google interdisent « YouTube » dans le nom d'une application : le produit est donc renommé. Le nouveau nom **n'est pas encore validé juridiquement** — voir [docs/BRAND_RENAME_CHECKLIST.md](docs/BRAND_RENAME_CHECKLIST.md).
+>
+> **Il n'y a pas encore de fichier LICENSE**, donc aucun droit open source n'est accordé malgré le caractère public de ce dépôt. Voir [docs/LICENSING_DECISION.md](docs/LICENSING_DECISION.md).
+>
+> **Il n'existe ni version hosted ni image Docker.** L'auto-hébergement est le seul moyen de l'utiliser aujourd'hui, en mono-locataire — voir [docs/HOSTED_READINESS.fr.md](docs/HOSTED_READINESS.fr.md).
+
+## Le pipeline Descript → YouTube
+
+C'est là que les autres outils s'arrêtent. À partir d'une transcription, l'application découpe des extraits autonomes avec leurs timecodes source, propose des titres notés, écrit les descriptions, tags et concepts de miniature — puis :
+
+1. **lit vos projets Descript** et vous laisse choisir la source ;
+2. **crée une composition verticale par Short dans ce projet**, nommée avec le titre retenu, portant le texte, les séquences source, les timecodes, la durée cible et, en option, votre vidéo CTA ;
+3. **laisse la composition source intacte** — il ajoute, il ne réécrit jamais votre montage ;
+4. **envoie sur YouTube une vidéo à la fois**, en privé, avec titre, description et tags, derrière un bouton *Tester avec 1 vidéo* qui prouve le chemin avant d'engager un lot ;
+5. **reprend au premier Short manquant** après une interruption, sans rien réenvoyer.
+
+La correspondance entre un Short et sa composition se fait par nom exact : renommer une composition dans Descript produit une erreur claire au lieu de publier la mauvaise vidéo.
+
+### Intégration Descript ou kit CapCut
+
+Deux routes, et la différence n'est pas une préférence :
+
+- **Descript** est une vraie intégration. L'application dialogue avec votre compte, crée les compositions et pilote l'envoi.
+- **CapCut** n'expose aucune API publique permettant de construire une timeline. Le kit n'est pas une intégration au rabais, c'est le substitut honnête : un ZIP contenant le plan de montage en CSV — une ligne par séquence à couper — le texte de chaque Short, les sous-titres SRT, la fiche de publication, la vidéo CTA optionnelle et un mode d'emploi. Tout ce qui peut être préparé à l'avance l'est ; la coupe vous revient.
+
+## Communauté / auto-hébergé
+
+Tout tourne sur votre propre compte Cloudflare avec vos propres clés API, chiffrées au repos et liées à votre identité. C'est **mono-locataire aujourd'hui** : un déploiement, un propriétaire. Lisez [docs/HOSTED_READINESS.fr.md](docs/HOSTED_READINESS.fr.md) avant de l'ouvrir à quiconque — il n'y a pas encore de fournisseur d'authentification vérifié, pas de limitation de débit et pas de procédure de suppression de compte.
+
+## Hosted — prévu
+
+Indisponible. Rien ne tourne, rien n'accepte d'inscription, rien n'est payable. L'écart entre ici et là est écrit dans [docs/HOSTED_READINESS.fr.md](docs/HOSTED_READINESS.fr.md), avec le backlog dans [docs/HOSTED_ROADMAP.md](docs/HOSTED_ROADMAP.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [Débogage](docs/DEBUGGING.fr.md) · [en](docs/DEBUGGING.md) | Installation, variables, symptôme → correction, diagnostic des intégrations |
+| [Contribution](CONTRIBUTING.md) | Branches, migrations, tests d'intégration, règles des routes qui dépensent |
+| [Sécurité](SECURITY.md) | Signalement privé, ce qui est protégé et ce qui ne l'est pas |
+| [Préparation hosted](docs/HOSTED_READINESS.fr.md) · [en](docs/HOSTED_READINESS.md) | Ce qui existe, ce qui n'existe pas |
+| [Feuille de route](docs/HOSTED_ROADMAP.md) | Backlog priorisé avec critères d'acceptation |
+| [Licence](docs/LICENSING_DECISION.md) | Pourquoi il n'y a pas encore de LICENSE |
+| [Renommage](docs/BRAND_RENAME_CHECKLIST.md) | Ce qui est fait, ce que seul le propriétaire peut faire |
+
+<!-- Captures d'écran et démonstration à ajouter une fois le renommage appliqué aux
+     captures. Aucun placeholder n'est committé : une capture fausse ou cassée est pire
+     que rien. -->
 
 ## Les quatre entrées
 
