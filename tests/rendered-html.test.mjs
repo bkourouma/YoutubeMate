@@ -1532,3 +1532,50 @@ test("packages the video in English without waiting for a vidIQ sync", async () 
   // And it refuses to spend on an empty headline.
   assert.match(generator, /if \(!english\.overlay\.trim\(\)\) return showToast/);
 });
+
+test("keeps both READMEs in step and current with what shipped", async () => {
+  const [en, fr] = await Promise.all([
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../README.fr.md", import.meta.url), "utf8"),
+  ]);
+  // They have drifted twice: a menu entry shipped without being listed, and features
+  // documented in one language only. Shape is the cheap proxy for substance.
+  const shape = text => ({
+    headings: (text.match(/^#{1,3} /gm) ?? []).length,
+    tableRows: (text.match(/^\|/gm) ?? []).length,
+    codeFences: (text.match(/^```/gm) ?? []).length,
+  });
+  assert.deepEqual(shape(en), shape(fr), "the two READMEs no longer have the same structure");
+  // Each links to the other, so a reader lands in their language from either side.
+  assert.match(en, /\[Français\]\(README\.fr\.md\)/);
+  assert.match(fr, /\[English\]\(README\.md\)/);
+
+  // Every menu entry in the app has to appear in the table, in both languages. The
+  // Credits Usage entry shipped and went unlisted for four commits.
+  const studio = await readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8");
+  const labelsStart = studio.indexOf("const labels = {");
+  const labels = studio.slice(labelsStart, studio.indexOf("validate:", labelsStart));
+  for (const key of ["studio", "shorts", "express", "shortsExpress", "navProjects", "usage", "profile"]) {
+    const label = labels.match(new RegExp(String.raw`\b${key}: "([^"]+)"`))?.[1];
+    assert.ok(label, `no French label found for the ${key} menu`);
+    assert.ok(fr.includes(label), `README.fr.md does not list the "${label}" menu`);
+  }
+
+  // Features that cost money or change what the user gets must be findable.
+  for (const [name, needleEn, needleFr] of [
+    ["English package", "English package", "package anglais"],
+    ["Credits Usage", "Credits Usage", "Credits Usage"],
+    ["Word export", "Word export", "Export Word"],
+    ["default tags", "Default tags", "tags par défaut"],
+    ["company logo", "Company logo", "Logo de l'entreprise"],
+  ]) {
+    assert.ok(en.toLowerCase().includes(needleEn.toLowerCase()), `README.md does not document ${name}`);
+    assert.ok(fr.toLowerCase().includes(needleFr.toLowerCase()), `README.fr.md does not document ${name}`);
+  }
+  // The architecture tree must name the tables that exist, or it misleads a newcomer.
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  for (const table of [...schema.matchAll(/sqliteTable\("(\w+)"/g)].map(match => match[1])) {
+    assert.ok(en.includes(table), `the architecture tree omits the ${table} table`);
+    assert.ok(fr.includes(table), `l'arbre d'architecture omet la table ${table}`);
+  }
+});

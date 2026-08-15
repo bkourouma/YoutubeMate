@@ -70,7 +70,8 @@ The menu is organised not by tool but by **what you already have in hand**: a su
 | 🎬 **Video package** | Long video already recorded | a recorded script | titles, description, tags, thumbnails |
 | ⚡ **Short package** | Short already edited | one or more shorts | titles, descriptions, vertical thumbnails |
 | ▤ **My projects** | | | the history, with its counter |
-| ◉ **My channel & settings** | | | profile, keys, photo, visual DNA |
+| ◷ **Credits Usage** | Cost per project | | what every action actually cost |
+| ◉ **My channel & settings** | | | profile, keys, photo, logo, visual DNA |
 
 The first two entries **produce the video**; the next two **dress a video that already exists**. "Package" deliberately brings them together: it is the same step of the craft, applied to two formats.
 
@@ -107,9 +108,50 @@ Two details separate a direction that is actually followed from a variant in dis
 - **Format respected.** Dimensions are transposed per pipeline: landscape for long form, portrait for shorts — never a 16:9 image cropped to 9:16.
 - **Your photo.** If a presenter photo is saved, it is sent with the request and the identity instruction overrides the rest of the prompt: the face must be **yours**, not an interpretation. Reference thumbnails serve the channel's recurring style, never to copy one composition.
 
+## The English package
+
+The same video, packaged for an English-speaking audience: title, description and a
+thumbnail headline written as a native headline rather than a word-for-word translation.
+
+It derives from the first option, and any of the three can be picked instead. **Every
+field is editable before an image is paid for** — a headline written for one audience
+rarely survives translation intact — and the edits persist with the packaging. The English
+thumbnail reuses the concept already chosen for that option, so it is the same picture
+with English text, not a different one.
+
+## Credits Usage
+
+Every paid call writes one line to a ledger: which project, which action, which model,
+tokens in and out, images, and the amount. The screen shows the total, the share per
+project, and — expanding a project — the cost of each step, so a figure can always be
+traced to the action that produced it.
+
+The two providers are not treated alike, and the screen says so. **OpenRouter reports what
+it actually charged** on every response, and that figure is stored as-is: a rate table in
+this repository would drift from the invoice the first time a price changed. **The images
+endpoint bills tokens and reports no cost**, so those amounts are computed from published
+rates and are estimates.
+
+Cache hits are recorded at zero cost rather than not at all — a ledger that goes silent
+exactly when caching works cannot show what caching saved.
+
+## Word export
+
+A working document, not a summary. Cover with your logo and channel name, production
+sheet, research, hook and fixed copy, the chapter plan as a table, the full script split
+on its chapter markers so Word's navigation pane mirrors the plan, conclusion, timecodes,
+the three packaging options with their thumbnail concepts, the YouTube description, tags,
+pinned comment and quiz with the correct answer flagged.
+
+Anything meant to be pasted elsewhere sits in a shaded block with no bullet or marker
+inside and one plain paragraph per line: what you select is exactly what the YouTube field
+receives. Tables, which copy badly, are used only for reference data.
+
 ## My channel & settings
 
-One screen for both pipelines: **Keys & connections** (OpenRouter, OpenAI, Descript, YouTube, models and image quality) · **Your photo in thumbnails** · **Thumbnail visual DNA** (the editorial system, inferred from your reference thumbnails and refinable by instruction) · the editorial profile and the automatic description block.
+One screen for both pipelines: **Keys & connections** (OpenRouter, OpenAI, Descript, YouTube, models and image quality) · **Company logo**, placed at the top of exported Word documents · **Your photo in thumbnails** · **Thumbnail visual DNA** (the editorial system, inferred from your reference thumbnails and refinable by instruction) · **Channel default tags** · the editorial profile and the automatic description block.
+
+**Default tags** are appended after the video's own, in the exported document. YouTube caps that field at 500 characters — not 500 tags, which is the reading that gets a video rejected — so what is counted is the exact string you paste. Above the limit, tags are dropped from the end, which is why the defaults go last: a generic channel tag is the right thing to sacrifice, a tag written for this video never is. Duplicates are removed, and whatever was cut is named in the document.
 
 ## Principles
 
@@ -155,27 +197,30 @@ These properties are covered by the test suite: a regression fails the build.
 ## Verification
 
 ```bash
-npx tsc --noEmit
-npm run lint
-npx vinext build
-node --test tests/rendered-html.test.mjs
+npm run verify          # typecheck, lint, build, tests
+npm run test:only       # tests alone, against an existing build
 ```
 
-The suite boots the real worker and checks the rendering, the route contracts and a set of invariants — no key in a request body, no shared fallback identity, Shorts styles confined, thumbnail ratios correct per format, a late server response unable to overwrite a local edit.
+The suite boots the real worker and checks the rendering, the route contracts and a set of invariants — no key in a request body, no invented identity, `DEV_USER_ID` refused in production, R2 keys matched against the prefix of their own kind, Shorts styles confined, thumbnail ratios correct per format, spending priced from the provider's own figures, and a late server response unable to overwrite a local edit.
+
+Some paths cannot be reached without real credentials — a live Descript project, a real upload, a real revocation. They are not faked into passing; they are listed as manual checks in [the debugging guide](docs/DEBUGGING.md).
 
 ## Architecture
 
 ```
 app/
+  config/product.ts     the product name and URLs — one place, so a rename is one line
   script-studio.tsx     shell (nav, language, alerts, persistence, profile) + long-form pipeline
   shorts-studio.tsx     shorts pipeline, rendered under .pipeline-shorts
   shorts-express.tsx    packaging for an already-edited short, single or bulk
+  credits-usage.tsx     the spending ledger, per project and per action
   globals.css           shared styles · shorts.css  shorts styles, all scoped
-  lib/capcut-kit.ts     CapCut ZIP construction, loaded on demand
-  server/               identity, secrets, http, poll, youtube, ai-cache, image-framing
+  lib/                  capcut-kit, word-export, tags, money, errors — loaded on demand
+  server/               auth, identity, secrets, http, poll, youtube, ai-cache,
+                        image-framing, headline, pricing, usage
   api/                  routes; the shorts-* routes are prefixed
 db/schema.ts            workspaces, integration_settings, ai_cache, shorts_projects,
-                        descript_jobs, youtube_auth, oauth_states
+                        descript_jobs, youtube_auth, oauth_states, usage_events
 ```
 
 Every Shorts style is scoped by `.pipeline-shorts`: the two stylesheets share seventeen class names, and this constraint — enforced by a test — makes the collision impossible rather than unlikely.
