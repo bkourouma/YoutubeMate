@@ -200,3 +200,21 @@ mention Docker.
 **Done when:** screenshots show the renamed product; a demo recording exists with no real
 credential or private content visible; a changelog and a tagged release exist; and no
 claim is made about a hosted version, a Docker image or a licence that is not yet true.
+
+---
+
+## P1-8 — Restore `npm ci` in CI by regenerating the lockfile on Linux
+
+`priority:P1`
+**Depends on:** nothing. **Effort:** minutes, on a Linux machine.
+
+CI runs `npm install` rather than `npm ci`, which gives up the reproducibility that a
+lockfile exists for. The cause is not this repository's dependencies: npm hoists the
+optional wasm fallbacks of `@tailwindcss/oxide` and `@rolldown/binding` differently on
+Linux than on Windows, where the lockfile was generated. `npm ci` on Linux therefore
+rejects a lockfile that installs cleanly on both platforms.
+
+**Done when:** `npm install` has been run once on Linux — a container, a CI job with a
+commit step, or any Linux checkout — the resulting `package-lock.json` is committed, the
+workflow is back to `npm ci`, and CI is green. Verify a Windows `npm ci` still succeeds
+afterwards, or the problem has simply moved.
