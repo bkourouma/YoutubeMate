@@ -49,7 +49,7 @@ type Project = {
 type ThumbnailConcept = { name: string; prompt: string };
 type PackagingOption = {
   id: "A" | "B" | "C"; register: string; title: string; description: string; overlay: string;
-  englishTitle?: string; englishDescription?: string;
+  englishTitle?: string; englishDescription?: string; englishOverlay?: string;
   concepts: ThumbnailConcept[];
 };
 type PackagingResult = {
@@ -89,6 +89,8 @@ type ExpressState = {
   package?: PackagingResult;
   vidiqScores?: Record<string, number>;
   vidiqStatus?: "idle" | "loading" | "synced" | "error";
+  /** The English package: which option it derives from, and the user's edits to it. */
+  english?: { optionId: string; title: string; description: string; overlay: string };
 };
 
 const expressDefault: ExpressState = {
@@ -961,8 +963,9 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
   projectRef: { projectId: string; projectTitle: string };
   autoStart?: boolean; embedded?: boolean;
 }) {
-  const [loading, setLoading] = useState<"package" | "images" | null>(null);
+  const [loading, setLoading] = useState<"package" | "images" | "english-image" | null>(null);
   const [images, setImages] = useState<Record<string, string>>({});
+  const [englishImage, setEnglishImage] = useState("");
   const [preview, setPreview] = useState<{ id: string; src: string; title: string; caption: string } | null>(null);
   const [promptEditor, setPromptEditor] = useState<{ optionId: string; index: number; draft: string; direction: string } | null>(null);
   const [promptLoading, setPromptLoading] = useState(false);
@@ -1066,6 +1069,40 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
     }
   };
 
+  /**
+   * The English package derives from one option, defaulting to the first — but every
+   * field stays editable, because a headline written for one audience rarely survives
+   * translation intact. Edits are persisted, so leaving the step does not discard them.
+   */
+  const englishFor = (option: PackagingOption) => ({
+    optionId: option.id,
+    title: option.englishTitle ?? option.title,
+    description: option.englishDescription ?? option.description,
+    // Packages generated before englishOverlay existed have none: fall back to the
+    // English title, shortened to headline length, as a starting point to edit.
+    overlay: option.englishOverlay
+      ?? (option.englishTitle ?? "").split(/\s+/).filter(Boolean).slice(0, 5).join(" ").toUpperCase(),
+  });
+
+  const generateEnglishThumbnail = async (option: PackagingOption, english: { overlay: string }) => {
+    if (!integrations.openai.configured) return showToast(lang === "fr" ? "Ajoutez votre clé OpenAI dans le Profil de chaîne." : "Add your OpenAI key in Channel profile.", "warning");
+    if (!english.overlay.trim()) return showToast(lang === "fr" ? "Saisissez le texte anglais de la miniature." : "Enter the English thumbnail headline.", "warning");
+    setLoading("english-image");
+    try {
+      const concept = option.concepts[value.selected[option.id] ?? 0];
+      const response = await fetch("/api/openai-image", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...projectRef, model: aiSettings.imageModel, quality: aiSettings.imageQuality, prompt: concept.prompt, overlay: english.overlay, channel: profile.channel, systemPrompt: profile.thumbnailSystemPrompt, referenceKeys: referenceThumbnails.map(reference => reference.key), presenterKey, pipeline: "script" }),
+      });
+      const data = await response.json() as { image?: string; error?: string; detail?: string };
+      if (!response.ok || !data.image) throw new Error(data.detail || data.error || "english_image_failed");
+      setEnglishImage(data.image);
+      showToast(lang === "fr" ? "Miniature anglaise générée" : "English thumbnail generated");
+    } catch (error) {
+      showToast(serverErrorMessage(error, lang, "openai"), "error");
+    } finally { setLoading(null); }
+  };
+
   const generateThumbnails = async (options: PackagingOption[]) => {
     if (!integrations.openai.configured) return showToast(lang === "fr" ? "Ajoutez votre clé OpenAI dans le Profil de chaîne." : "Add your OpenAI key in Channel profile.", "warning");
     setLoading("images");
@@ -1164,6 +1201,9 @@ function ExpressPackagingAI({ value, setValue, profile, lang, copy, showToast, a
       </div>; })}</div></article>)}</div>
       <div className="vidiq-truth-note">◆ {value.vidiqStatus === "error" ? (lang === "fr" ? "vidIQ n’a renvoyé aucun score. Aucun remplacement n’est affiché." : "vidIQ returned no score. No replacement is displayed.") : (lang === "fr" ? "Les valeurs vidIQ sont affichées telles quelles, sans estimation locale." : "vidIQ values are shown exactly as returned, with no local estimate.")}</div>
       <div className={`english-winner ${bestScoredOption ? "ready" : "pending"}`}><div className="english-winner-head"><div><span>EN</span><div><strong>{lang === "fr" ? "Meilleur packaging en anglais" : "Top-scoring packaging in English"}</strong><small>{bestScoredOption ? `OPTION ${bestScoredOption.id} · ${value.vidiqScores?.[bestScoredOption.id]}/100 vidIQ` : (lang === "fr" ? "Disponible après la synchronisation vidIQ" : "Available after vidIQ synchronization")}</small></div></div>{bestScoredOption && <button onClick={() => copy(`${bestScoredOption.englishTitle ?? bestScoredOption.title}\n\n${bestScoredOption.englishDescription ?? bestScoredOption.description}`)}>⧉ {lang === "fr" ? "Copier l’ensemble" : "Copy all"}</button>}</div>{bestScoredOption ? <div className="english-winner-copy"><article><small>ENGLISH TITLE</small><h3>{bestScoredOption.englishTitle ?? bestScoredOption.title}</h3><button onClick={() => copy(bestScoredOption.englishTitle ?? bestScoredOption.title)}>⧉</button></article><article><small>ENGLISH DESCRIPTION</small><p>{bestScoredOption.englishDescription ?? bestScoredOption.description}</p><button onClick={() => copy(bestScoredOption.englishDescription ?? bestScoredOption.description)}>⧉</button></article></div> : <p>{lang === "fr" ? "Cliquez sur « Synchroniser les scores vidIQ » : la traduction anglaise de l’option gagnante apparaîtra ici." : "Click “Sync vidIQ scores” to display the English version of the winning option here."}</p>}</div>
+      <EnglishPackage pack={pack} value={value} update={update} lang={lang} copy={copy} englishFor={englishFor}
+        image={englishImage} loading={loading === "english-image"} generate={generateEnglishThumbnail}
+        download={source => downloadThumbnail(source, "en")} preview={setPreview} />
       {(referenceThumbnails.length > 0 || profile.thumbnailSystemPrompt) && <div className="visual-dna-active">◆ {lang === "fr" ? "ADN visuel actif" : "Visual DNA active"} · {referenceThumbnails.length} {lang === "fr" ? "référence(s)" : "reference(s)"} · {profile.thumbnailSystemPrompt ? (lang === "fr" ? "prompt système appliqué" : "system prompt applied") : (lang === "fr" ? "prompt système à générer" : "system prompt pending")}</div>}
       <button className="primary thumbnail-cta" onClick={() => generateThumbnails(pack.options)} disabled={loading !== null}>✦ {loading === "images" ? (lang === "fr" ? "OpenAI génère 3 images…" : "OpenAI is generating 3 images…") : (lang === "fr" ? "Générer les 3 vraies miniatures" : "Generate 3 real thumbnails")}</button>
       {!integrations.openai.configured && <button className="inline-config" onClick={openAiSettings}>{lang === "fr" ? "Ajouter la clé OpenAI" : "Add OpenAI key"} →</button>}
@@ -1249,6 +1289,67 @@ const PUBLISH_CHECKLIST = [
 /** Every item ticked unless the project says otherwise. */
 function checklistState(project: Pick<Project, "publishChecklist">) {
   return Object.fromEntries(PUBLISH_CHECKLIST.map(item => [item.key, project.publishChecklist?.[item.key] ?? true]));
+}
+
+/**
+ * The English package. The English title and description already existed but were only
+ * revealed after a vidIQ sync — which needs a personal relay, so most of the time they
+ * were generated and never seen. This shows them unconditionally, adds the English
+ * thumbnail headline, and lets every field be rewritten before an image is paid for.
+ */
+function EnglishPackage({ pack, value, update, lang, copy, englishFor, image, loading, generate, download, preview }: {
+  pack: PackagingResult; value: ExpressState; update: (patch: Partial<ExpressState>) => void; lang: Lang;
+  copy: (value: string) => void; englishFor: (option: PackagingOption) => NonNullable<ExpressState["english"]>;
+  image: string; loading: boolean;
+  generate: (option: PackagingOption, english: { overlay: string }) => void;
+  download: (source: string) => void;
+  preview: (value: { id: string; src: string; title: string; caption: string }) => void;
+}) {
+  const chosen = pack.options.find(option => option.id === value.english?.optionId) ?? pack.options[0];
+  if (!chosen) return null;
+  const english = value.english?.optionId === chosen.id ? value.english : englishFor(chosen);
+  const edit = (patch: Partial<NonNullable<ExpressState["english"]>>) => update({ english: { ...english, ...patch } });
+  const t = (fr: string, en: string) => (lang === "fr" ? fr : en);
+
+  return <div className="english-package">
+    <div className="english-package-head">
+      <span>EN</span>
+      <div>
+        <strong>{t("Package anglais", "English package")}</strong>
+        <small>{t("Repris de l’option choisie, entièrement modifiable avant de générer l’image.", "Taken from the chosen option, fully editable before any image is generated.")}</small>
+      </div>
+      <div className="english-option-picker" role="group" aria-label={t("Option source", "Source option")}>
+        {pack.options.map(option => <button key={option.id} className={option.id === chosen.id ? "active" : ""}
+          onClick={() => update({ english: englishFor(option) })}>{option.id}</button>)}
+      </div>
+      <button className="ghost" onClick={() => copy(`${english.title}\n\n${english.description}`)}>⧉ {t("Copier", "Copy")}</button>
+    </div>
+
+    <label className="english-field"><span>ENGLISH TITLE</span>
+      <input value={english.title} maxLength={300} onChange={event => edit({ title: event.target.value })} /></label>
+    <label className="english-field"><span>ENGLISH DESCRIPTION</span>
+      <textarea value={english.description} rows={3} maxLength={2000} onChange={event => edit({ description: event.target.value })} /></label>
+    <label className="english-field"><span>ENGLISH THUMBNAIL HEADLINE</span>
+      <input value={english.overlay} maxLength={80} onChange={event => edit({ overlay: event.target.value.toUpperCase() })}
+        placeholder={t("2 à 5 mots, en majuscules", "2 to 5 words, uppercase")} />
+      <small>{t(
+        `Rendu dans l’image. Concept retenu : ${chosen.concepts[value.selected[chosen.id] ?? 0]?.name ?? "—"}.`,
+        `Rendered into the image. Chosen concept: ${chosen.concepts[value.selected[chosen.id] ?? 0]?.name ?? "—"}.`)}</small>
+    </label>
+
+    <div className="english-actions">
+      <button className="primary" onClick={() => generate(chosen, english)} disabled={loading || !english.overlay.trim()}>
+        ✦ {loading ? t("OpenAI génère…", "OpenAI is generating…") : t("Générer la miniature anglaise", "Generate the English thumbnail")}
+      </button>
+      {image && <button className="ghost" onClick={() => download(image)}>↓ PNG · 1280 × 720</button>}
+    </div>
+
+    {image && <figure className="english-thumbnail">
+      <img src={image} alt={t("Miniature anglaise", "English thumbnail")} />
+      <button className="thumbnail-zoom" aria-label={t("Agrandir la miniature anglaise", "Enlarge the English thumbnail")}
+        onClick={() => preview({ id: `${chosen.id} · EN`, src: image, title: english.overlay, caption: english.title })} />
+    </figure>}
+  </div>;
 }
 
 function Question({ n, label, value, set, placeholder, help, optional }: { n: string; label: string; value: string; set: (v: string) => void; placeholder: string; help?: string; optional?: string }) { return <label className="question"><span>{n}</span><div className="question-label"><strong>{label}{optional && <i>{optional}</i>}</strong>{help && <small>{help}</small>}</div><textarea value={value} onChange={e => set(e.target.value)} placeholder={placeholder} rows={3} /></label>; }

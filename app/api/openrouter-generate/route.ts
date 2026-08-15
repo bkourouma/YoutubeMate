@@ -46,6 +46,7 @@ export async function POST(request: Request) {
       "englishTitle": "natural English translation of the YouTube title",
       "englishDescription": "natural English translation of the A/B test description",
       "overlay": "2-5 WORD THUMBNAIL HEADLINE",
+      "englishOverlay": "THE SAME HEADLINE IN ENGLISH, 2-5 WORDS",
       "concepts": [{"name":"short concept name","prompt":"detailed English image prompt"}]
     }],
     "improvedDescription": "complete YouTube description",
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
     "quiz": [{"question":"question","options":["answer A","answer B","answer C"],"correctOption":0}]
   }`;
   const instructions = `You are a senior YouTube packaging strategist. Return only valid JSON matching this schema: ${schema}
-Rules: write viewer-facing copy in ${language}; create exactly 3 options with ids A, B, C; for every option also provide a fluent, natural English version in englishTitle and englishDescription so the app can reveal the vidIQ winner after scoring; each option must contain exactly 3 distinct thumbnail concepts; every image prompt must be in English, composed for a 16:9 YouTube thumbnail, high contrast, clear focal subject, no logo and no watermark; the 2-5 word overlay headline is rendered into the image, so compose a large uncluttered high-contrast area to hold it; a prompt may also call for a few short supporting text elements — a badge, a sticker, a number — and every word meant to appear in the image must be quoted exactly and written in ${language}; produce 8-15 relevant tags; create one concise pinnedComment in ${language}, 2-4 sentences, grounded in the source, ending with one specific question that encourages genuine replies; never invent facts, figures, links, offers or promises not found in the source. ${hasScript ? "Create exactly 5 quiz items. Every item must contain one question, exactly 3 plausible answer options, and correctOption as the zero-based index (0, 1, or 2) of the only correct option. The correct option must be strictly supported by the script. Distractors must be clearly false according to the source but not absurd." : "Return an empty quiz array."} The automatic description footer is managed by the application; do not paraphrase it.`;
+Rules: write viewer-facing copy in ${language}; create exactly 3 options with ids A, B, C; for every option also provide a fluent, natural English version in englishTitle, englishDescription and englishOverlay, so the same video can be packaged for an English-speaking audience; englishOverlay must read as a native English thumbnail headline, not a word-for-word translation; each option must contain exactly 3 distinct thumbnail concepts; every image prompt must be in English, composed for a 16:9 YouTube thumbnail, high contrast, clear focal subject, no logo and no watermark; the 2-5 word overlay headline is rendered into the image, so compose a large uncluttered high-contrast area to hold it; a prompt may also call for a few short supporting text elements — a badge, a sticker, a number — and every word meant to appear in the image must be quoted exactly and written in ${language}; produce 8-15 relevant tags; create one concise pinnedComment in ${language}, 2-4 sentences, grounded in the source, ending with one specific question that encourages genuine replies; never invent facts, figures, links, offers or promises not found in the source. ${hasScript ? "Create exactly 5 quiz items. Every item must contain one question, exactly 3 plausible answer options, and correctOption as the zero-based index (0, 1, or 2) of the only correct option. The correct option must be strictly supported by the script. Distractors must be clearly false according to the source but not absurd." : "Return an empty quiz array."} The automatic description footer is managed by the application; do not paraphrase it.`;
   // A regeneration carries the user's direction and the titles they just rejected, so
   // the model changes course instead of returning near-identical options.
   const direction = typeof body.direction === "string" ? body.direction.trim().slice(0, 2_000) : "";
@@ -89,13 +90,14 @@ Rules: write viewer-facing copy in ${language}; create exactly 3 options with id
     const result = parseJsonContent(content) as {
       improvedDescription?: string;
       pinnedComment?: string;
-      options?: Array<{ englishTitle?: string; englishDescription?: string }>;
+      options?: Array<{ englishTitle?: string; englishDescription?: string; englishOverlay?: string }>;
       quiz?: Array<{ question?: string; options?: unknown[]; correctOption?: number }>;
       [key: string]: unknown;
     };
     const validEnglishPackaging = Array.isArray(result.options) && result.options.length === 3 && result.options.every(option =>
       typeof option.englishTitle === "string" && option.englishTitle.trim() &&
-      typeof option.englishDescription === "string" && option.englishDescription.trim()
+      typeof option.englishDescription === "string" && option.englishDescription.trim() &&
+      typeof option.englishOverlay === "string" && option.englishOverlay.trim()
     );
     if (!validEnglishPackaging || typeof result.pinnedComment !== "string" || !result.pinnedComment.trim()) return Response.json({ error: "openrouter_invalid_packaging_extras" }, { status: 502 });
     if (hasScript) {

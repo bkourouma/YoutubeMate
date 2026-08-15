@@ -1495,3 +1495,40 @@ test("resolves a local identity without the proxy header, and never in productio
     if (previousEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousEnv;
   }
 });
+
+test("packages the video in English without waiting for a vidIQ sync", async () => {
+  const [studio, route] = await Promise.all([
+    readFile(new URL("../app/script-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/openrouter-generate/route.ts", import.meta.url), "utf8"),
+  ]);
+  // The model writes the English headline too, so a thumbnail can carry English text
+  // rather than the French overlay, and it is rejected if it comes back missing.
+  assert.match(route, /"englishOverlay": "THE SAME HEADLINE IN ENGLISH/);
+  assert.match(route, /not a word-for-word translation/);
+  assert.match(route, /typeof option\.englishOverlay === "string" && option\.englishOverlay\.trim\(\)/);
+
+  // The English title and description already existed but only appeared after a vidIQ
+  // sync, which needs a personal relay — so most runs generated them and never showed
+  // them. The English package renders from the packaging alone.
+  assert.match(studio, /function EnglishPackage/);
+  assert.match(studio, /<EnglishPackage pack=\{pack\}/);
+  const section = studio.slice(studio.indexOf("function EnglishPackage"), studio.indexOf("function Question"));
+  assert.doesNotMatch(section, /vidiq/i, "the English package still depends on vidIQ");
+
+  // Every field is editable, and the edits persist with the packaging.
+  for (const field of ["title", "description", "overlay"]) {
+    assert.ok(section.includes(`edit({ ${field}:`), `the English ${field} cannot be edited`);
+  }
+  assert.match(studio, /english\?: \{ optionId: string; title: string; description: string; overlay: string \}/);
+  // It derives from the first option by default, and any option can be picked instead.
+  assert.match(section, /pack\.options\.find\(option => option\.id === value\.english\?\.optionId\) \?\? pack\.options\[0\]/);
+  assert.match(section, /update\(\{ english: englishFor\(option\) \}\)/);
+  // Packages generated before englishOverlay existed still get a starting point.
+  assert.match(studio, /option\.englishOverlay\s*\n?\s*\?\?/);
+  // The image is generated from the English headline, never the French one.
+  const generator = studio.slice(studio.indexOf("const generateEnglishThumbnail"), studio.indexOf("const generateThumbnails"));
+  assert.match(generator, /overlay: english\.overlay/);
+  assert.doesNotMatch(generator, /overlay: option\.overlay/);
+  // And it refuses to spend on an empty headline.
+  assert.match(generator, /if \(!english\.overlay\.trim\(\)\) return showToast/);
+});
