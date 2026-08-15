@@ -23,7 +23,7 @@ jobs:
       SETTINGS_ENCRYPTION_KEY: ci-placeholder-key-not-a-real-secret
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v5
         with:
